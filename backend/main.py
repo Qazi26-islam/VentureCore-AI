@@ -1,4 +1,5 @@
 import logging
+import os
 import secrets
 from pathlib import Path
 from fastapi import FastAPI
@@ -15,9 +16,10 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 
-app = FastAPI(title="Multi-Agent Business Research System")
+app = FastAPI(title="VentureCore AI")
 
-app.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(32))
+SESSION_SECRET = os.getenv("SESSION_SECRET", secrets.token_hex(32))
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 
 app.include_router(research_router)
 app.include_router(auth_router)
