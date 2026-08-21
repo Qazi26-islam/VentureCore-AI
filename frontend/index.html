@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>VentureCore AI</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #12161f;
+    --panel2: #171c28;
+    --border: #232838;
+    --text: #e6e9f0;
+    --muted: #7a8399;
+    --accent: #7c9cff;
+    --accent-glow: rgba(124, 156, 255, 0.35);
+    --done: #4ade80;
+    --error: #f87171;
+  }
+  * { box-sizing: border-box; }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 10px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+  body {
+    background: radial-gradient(circle at 20% 0%, #161c2b 0%, var(--bg) 55%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  #authOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 7, 12, 0.85);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .auth-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 320px; }
+  .auth-card h2 { margin: 0 0 4px; font-size: 20px; text-align: center; }
+  .auth-card p.sub { color: var(--muted); font-size: 13px; text-align: center; margin: 0 0 20px; }
+  .auth-field { margin-bottom: 12px; }
+  .auth-field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .auth-field input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 14px; }
+  .auth-field input:focus { outline: none; border-color: var(--accent); }
+  .auth-submit { width: 100%; padding: 11px; border-radius: 8px; border: none; background: linear-gradient(135deg, #7c9cff, #5b7cfa); color: white; font-weight: 600; font-size: 14px; cursor: pointer; margin-top: 6px; }
+  .auth-error { color: var(--error); font-size: 12px; margin-top: 8px; min-height: 14px; text-align: center; }
+  .auth-toggle { text-align: center; font-size: 12px; color: var(--muted); margin-top: 16px; }
+  .auth-toggle a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .auth-skip { text-align: center; font-size: 12px; color: var(--muted); margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .auth-skip a { color: var(--muted); cursor: pointer; text-decoration: underline; }
+  .auth-skip a:hover { color: var(--text); }
+
+  .app-layout {
+    display: flex;
+    height: 100vh;
+  }
+
+  .sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    height: 100vh;
+    border-right: 1px solid var(--border);
+    padding: 22px 14px 20px;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.2s, padding 0.2s, opacity 0.2s;
+    overflow: hidden;
+  }
+  .sidebar.collapsed {
+    width: 0;
+    padding: 22px 0 20px;
+    opacity: 0;
+    border-right: none;
+  }
+  .sidebar-inner { width: 212px; flex-shrink: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .brand-name {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -0.2px;
+    color: var(--text);
+    margin-bottom: 16px;
+    flex-shrink: 0;
+  }
+  .sidebar-user { font-size: 12px; color: var(--muted); padding: 0 4px 14px; border-bottom: 1px solid var(--border); margin-bottom: 14px; word-break: break-all; flex-shrink: 0; }
+  .sidebar-user .email { color: var(--text); font-weight: 600; display: block; margin-bottom: 6px; }
+  .logout-btn { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 11px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+  .logout-btn:hover { color: var(--text); border-color: var(--muted); }
+  .new-research-btn { width: 100%; padding: 7px; border-radius: 8px; border: 1px dashed var(--border); background: none; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 14px; flex-shrink: 0; }
+  .new-research-btn:hover { border-color: var(--accent); }
+  .new-research-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .new-research-btn:disabled:hover { border-color: var(--border); }
+  .history-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; padding: 0 4px; flex-shrink: 0; }
+  .history-list {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .history-item { padding: 9px 10px; border-radius: 8px; font-size: 12.5px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+  .history-item:hover { background: var(--panel); color: var(--text); }
+  .history-item.active { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+  .history-empty { font-size: 12px; color: var(--muted); padding: 4px; }
+  .guest-note { font-size: 11.5px; color: var(--muted); padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; line-height: 1.5; flex-shrink: 0; }
+  .guest-note a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+  .sidebar-toggle {
+    position: fixed;
+    top: 20px;
+    left: 196px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 50;
+    transition: left 0.2s, color 0.2s, border-color 0.2s;
+  }
+  .sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
+  .sidebar-toggle svg { width: 16px; height: 16px; stroke: currentColor; }
+  .sidebar-toggle.shifted { left: 14px; }
+
+  .main-area {
+    flex: 1;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 40px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; width: 100%; flex: 1; }
+  header { text-align: center; margin-bottom: 36px; }
+  header h1 { font-size: 28px; margin: 0 0 8px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .gradient-text { background: linear-gradient(90deg, #a5b4ff, #7c9cff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .logo-icon { position: relative; display: inline-flex; animation: breathe 2.8s ease-in-out infinite; }
+  .logo-icon svg { width: 34px; height: 34px; stroke: var(--accent); filter: drop-shadow(0 0 6px var(--accent-glow)); }
+  .ai-badge { position: absolute; bottom: -4px; right: -8px; background: linear-gradient(135deg, #7c9cff, #5b7cfa); color: white; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; padding: 1px 5px; border-radius: 6px; border: 2px solid var(--bg); box-shadow: 0 0 8px var(--accent-glow); }
+  @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+  header p { color: var(--muted); margin: 0; font-size: 14px; }
+  .input-row { display: flex; gap: 10px; margin-bottom: 32px; align-items: center; }
+  textarea { flex: 1; resize: none; height: 54px; max-height: 160px; padding: 15px 16px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 14px; font-family: inherit; line-height: 1.4; overflow-y: auto; }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  button.primary { padding: 0 22px; height: 54px; border-radius: 12px; border: none; background: linear-gradient(135deg, #7c9cff, #5b7cfa); color: white; font-weight: 600; font-size: 14px; cursor: pointer; transition: transform 0.15s, opacity 0.15s; flex-shrink: 0; }
+  button.primary:hover { transform: translateY(-1px); }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .agents { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .agent-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 12px; text-align: center; transition: border-color 0.3s, box-shadow 0.3s; }
+  .agent-card .icon { margin-bottom: 8px; display: flex; justify-content: center; }
+  .agent-card .icon svg { width: 22px; height: 22px; stroke: var(--muted); transition: stroke 0.3s; }
+  .agent-card .name { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .agent-card .state { font-size: 11px; margin-top: 4px; color: var(--muted); }
+  .agent-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow), 0 0 24px var(--accent-glow); animation: pulse 1.4s ease-in-out infinite; }
+  .agent-card.active .icon svg { stroke: var(--accent); }
+  .agent-card.active .state { color: var(--accent); }
+  .agent-card.complete { border-color: var(--done); }
+  .agent-card.complete .icon svg { stroke: var(--done); }
+  .agent-card.complete .state { color: var(--done); }
+  .agent-card.error { border-color: var(--error); }
+  .agent-card.error .icon svg { stroke: var(--error); }
+  .agent-card.error .state { color: var(--error); }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 1px var(--accent-glow), 0 0 24px var(--accent-glow); } 50% { box-shadow: 0 0 0 1px var(--accent-glow), 0 0 40px var(--accent-glow); } }
+  #report-section { display: none; margin-bottom: 24px; }
+  .report-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 28px; line-height: 1.7; font-size: 14.5px; }
+  .report-card h2 { margin-top: 0; font-size: 18px; color: var(--accent); }
+  .report-card h3 { font-size: 15px; color: var(--accent); margin-top: 24px; margin-bottom: 8px; }
+  .report-card strong { color: #fff; font-weight: 600; }
+  .report-card ul, .report-card ol { padding-left: 20px; margin: 10px 0; }
+  .report-card li { margin-bottom: 6px; }
+  .report-card p { margin: 10px 0; }
+  .report-card hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+  #followup-section { display: none; margin-bottom: 24px; }
+  .followup-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+  .followup-card h3 { margin: 0 0 14px; font-size: 14px; color: var(--muted); font-weight: 700; }
+  .followup-messages { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; max-height: 320px; overflow-y: auto; }
+  .followup-msg { padding: 10px 13px; border-radius: 10px; font-size: 13.5px; line-height: 1.5; max-width: 85%; }
+  .followup-msg p { margin: 0 0 8px; }
+  .followup-msg p:last-child { margin-bottom: 0; }
+  .followup-msg strong { color: inherit; font-weight: 700; }
+  .followup-msg ul, .followup-msg ol { margin: 8px 0; padding-left: 18px; }
+  .followup-msg li { margin-bottom: 4px; }
+  .followup-msg.user { align-self: flex-end; background: linear-gradient(135deg, #7c9cff, #5b7cfa); color: white; }
+  .followup-msg.assistant { align-self: flex-start; background: var(--panel2); border: 1px solid var(--border); }
+  .followup-input-row { display: flex; gap: 8px; }
+  .followup-input-row textarea { height: 44px; font-size: 13px; }
+  .followup-input-row button { height: 44px; padding: 0 18px; font-size: 13px; }
+  .hint { text-align: center; color: var(--muted); font-size: 13px; margin-top: 4px; margin-bottom: 20px; }
+  .footer { text-align: center; color: var(--muted); font-size: 12px; font-weight: 600; padding-top: 24px; margin-top: auto; }
+</style>
+</head>
+<body>
+
+  <button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <line x1="9" y1="3" x2="9" y2="21"/>
+    </svg>
+  </button>
+
+  <!-- AUTH OVERLAY -->
+  <div id="authOverlay">
+    <div class="auth-card">
+      <h2 id="authTitle">Welcome back</h2>
+      <p class="sub" id="authSub">Log in to continue your research</p>
+
+      <div class="auth-field">
+        <label>Email</label>
+        <input type="email" id="authEmail" placeholder="you@example.com" />
+      </div>
+      <div class="auth-field">
+        <label>Password</label>
+        <input type="password" id="authPassword" placeholder="••••••••" />
+      </div>
+      <div class="auth-field" id="confirmPasswordField" style="display:none;">
+        <label>Confirm Password</label>
+        <input type="password" id="authConfirmPassword" placeholder="••••••••" />
+      </div>
+      <button class="auth-submit" id="authSubmitBtn">Log In</button>
+      <div class="auth-error" id="authError"></div>
+      <div class="auth-toggle" id="authToggle">
+        Don't have an account? <a id="authToggleLink">Sign up</a>
+      </div>
+      <div class="auth-skip">
+        <a id="skipLoginLink">Continue without signing in</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-inner">
+        <div class="brand-name">VentureCore AI</div>
+        <div class="sidebar-user" id="sidebarUserBlock">
+          <span class="email" id="userEmail">-</span>
+          <button class="logout-btn" id="logoutBtn">Log out</button>
+        </div>
+        <button class="new-research-btn" id="newResearchBtn">+ New Research</button>
+        <div class="history-label" id="historyLabel">History</div>
+        <div class="history-list" id="historyList">
+          <div class="history-empty">No research yet.</div>
+        </div>
+        <div class="guest-note" id="guestNote" style="display:none;">
+          Browsing as guest. <a id="guestLoginLink">Log in</a> to save your research history.
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <div class="wrap">
+        <header>
+          <h1>
+            <span class="logo-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+                <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+                <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+                <path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/>
+                <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/>
+                <path d="M3.477 10.896a4 4 0 0 1 .585-.396"/>
+                <path d="M19.938 10.5a4 4 0 0 1 .585.396"/>
+                <path d="M6 18a4 4 0 0 1-1.967-.516"/>
+                <path d="M19.967 17.484A4 4 0 0 1 18 18"/>
+              </svg>
+              <span class="ai-badge">AI</span>
+            </span>
+            <span class="gradient-text">Business Research Agents</span>
+          </h1>
+          <p>Coordinator → Market Research, Competitor, Financial → Synthesis</p>
+        </header>
+
+        <div class="input-row">
+          <textarea id="question" placeholder="e.g. Should I open a bubble tea shop near Taylor's University Lakeside Campus?"></textarea>
+          <button class="primary" id="submitBtn">Research</button>
+        </div>
+
+        <div class="agents">
+          <div class="agent-card" data-stage="market_research">
+            <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></div>
+            <div class="name">Market Research</div>
+            <div class="state">Idle</div>
+          </div>
+          <div class="agent-card" data-stage="competitor_analysis">
+            <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg></div>
+            <div class="name">Competitor</div>
+            <div class="state">Idle</div>
+          </div>
+          <div class="agent-card" data-stage="financial_analysis">
+            <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+            <div class="name">Financial</div>
+            <div class="state">Idle</div>
+          </div>
+          <div class="agent-card" data-stage="synthesis">
+            <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"/></svg></div>
+            <div class="name">Synthesis</div>
+            <div class="state">Idle</div>
+          </div>
+        </div>
+
+        <div class="hint" id="hint">Enter a business question above to begin.</div>
+
+        <div id="report-section">
+          <div class="report-card">
+            <h2>Final Report</h2>
+            <div id="report-text"></div>
+          </div>
+        </div>
+
+        <div id="followup-section">
+          <div class="followup-card">
+            <h3>Ask a follow-up question</h3>
+            <div class="followup-messages" id="followupMessages"></div>
+            <div class="followup-input-row">
+              <textarea id="followupInput" placeholder="Ask something about this report..."></textarea>
+              <button class="primary" id="followupSendBtn">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">Created by Qazi Tanzimul Islam</div>
+    </main>
+  </div>
+
+<script>
+let currentJobId = null;
+let authMode = "login";
+let isGuest = false;
+let isResearching = false;
+
+const authOverlay = document.getElementById("authOverlay");
+const authTitle = document.getElementById("authTitle");
+const authSub = document.getElementById("authSub");
+const authEmail = document.getElementById("authEmail");
+const authPassword = document.getElementById("authPassword");
+const authSubmitBtn = document.getElementById("authSubmitBtn");
+const authError = document.getElementById("authError");
+const authToggleText = document.getElementById("authToggle");
+const skipLoginLink = document.getElementById("skipLoginLink");
+
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebarToggle");
+const sidebarUserBlock = document.getElementById("sidebarUserBlock");
+const guestNote = document.getElementById("guestNote");
+const guestLoginLink = document.getElementById("guestLoginLink");
+const historyLabel = document.getElementById("historyLabel");
+const userEmailEl = document.getElementById("userEmail");
+const logoutBtn = document.getElementById("logoutBtn");
+const newResearchBtn = document.getElementById("newResearchBtn");
+const historyList = document.getElementById("historyList");
+
+const STAGE_ORDER = ["market_research", "competitor_analysis", "financial_analysis", "synthesis"];
+const cards = {};
+document.querySelectorAll(".agent-card").forEach(c => cards[c.dataset.stage] = c);
+
+const questionEl = document.getElementById("question");
+const submitBtn = document.getElementById("submitBtn");
+const hint = document.getElementById("hint");
+const reportSection = document.getElementById("report-section");
+const reportText = document.getElementById("report-text");
+
+const followupSection = document.getElementById("followup-section");
+const followupMessages = document.getElementById("followupMessages");
+const followupInput = document.getElementById("followupInput");
+const followupSendBtn = document.getElementById("followupSendBtn");
+
+sidebarToggle.addEventListener("click", () => {
+  sidebar.classList.toggle("collapsed");
+  sidebarToggle.classList.toggle("shifted");
+});
+
+function setAuthMode(mode) {
+  authMode = mode;
+  authError.textContent = "";
+  const confirmField = document.getElementById("confirmPasswordField");
+  if (mode === "login") {
+    authTitle.textContent = "Welcome back";
+    authSub.textContent = "Log in to continue your research";
+    authSubmitBtn.textContent = "Log In";
+    authToggleText.innerHTML = "Don't have an account? <a id=\"authToggleLink\">Sign up</a>";
+    confirmField.style.display = "none";
+  } else {
+    authTitle.textContent = "Create an account";
+    authSub.textContent = "Sign up to save your research history";
+    authSubmitBtn.textContent = "Sign Up";
+    authToggleText.innerHTML = "Already have an account? <a id=\"authToggleLink\">Log in</a>";
+    confirmField.style.display = "block";
+  }
+  document.getElementById("authToggleLink").addEventListener("click", () => {
+    setAuthMode(authMode === "login" ? "signup" : "login");
+  });
+}
+setAuthMode("login");
+
+authSubmitBtn.addEventListener("click", async () => {
+  const email = authEmail.value.trim();
+  const password = authPassword.value;
+  authError.textContent = "";
+
+  if (!email || !password) {
+    authError.textContent = "Please fill in both fields.";
+    return;
+  }
+
+  if (authMode === "signup") {
+    const confirmPassword = document.getElementById("authConfirmPassword").value;
+    if (password !== confirmPassword) {
+      authError.textContent = "Passwords don't match.";
+      return;
+    }
+  }
+
+  const endpoint = authMode === "login" ? "/auth/login" : "/auth/signup";
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      authError.textContent = data.detail || "Something went wrong.";
+      return;
+    }
+    isGuest = false;
+    authOverlay.style.display = "none";
+    await afterLogin(data.email);
+  } catch (e) {
+    authError.textContent = "Network error. Is the server running?";
+  }
+});
+
+skipLoginLink.addEventListener("click", () => {
+  enterGuestMode();
+});
+
+guestLoginLink.addEventListener("click", () => {
+  authOverlay.style.display = "flex";
+});
+
+function enterGuestMode() {
+  isGuest = true;
+  authOverlay.style.display = "none";
+  sidebarUserBlock.style.display = "none";
+  guestNote.style.display = "block";
+  historyLabel.style.display = "none";
+  historyList.style.display = "none";
+}
+
+logoutBtn.addEventListener("click", async () => {
+  await fetch("/auth/logout", { method: "POST" });
+  location.reload();
+});
+
+async function afterLogin(email) {
+  sidebarUserBlock.style.display = "block";
+  guestNote.style.display = "none";
+  historyLabel.style.display = "block";
+  historyList.style.display = "flex";
+  userEmailEl.textContent = email;
+  await loadHistory();
+}
+
+async function checkAuth() {
+  const res = await fetch("/auth/me");
+  const data = await res.json();
+  if (data.logged_in) {
+    authOverlay.style.display = "none";
+    await afterLogin(data.email);
+  } else {
+    authOverlay.style.display = "flex";
+  }
+}
+checkAuth();
+
+async function loadHistory() {
+  if (isGuest) return;
+  const res = await fetch("/research/history");
+  if (!res.ok) return;
+  const items = await res.json();
+
+  if (items.length === 0) {
+    historyList.innerHTML = "<div class=\"history-empty\">No research yet.</div>";
+    return;
+  }
+
+  historyList.innerHTML = "";
+  items.forEach(item => {
+    const div = document.createElement("div");
+    div.className = "history-item";
+    div.textContent = item.question;
+    if (item.id === currentJobId) div.classList.add("active");
+    div.addEventListener("click", () => loadJob(item.id));
+    historyList.appendChild(div);
+  });
+}
+
+async function loadJob(jobId) {
+  const res = await fetch("/research/job/" + jobId);
+  if (!res.ok) return;
+  const job = await res.json();
+
+  currentJobId = jobId;
+  questionEl.value = job.question;
+
+  resetCards();
+
+  if (job.report) {
+    STAGE_ORDER.forEach(stage => {
+      cards[stage].className = "agent-card complete";
+      cards[stage].querySelector(".state").textContent = "Done";
+    });
+    reportSection.style.display = "block";
+    reportText.innerHTML = marked.parse(job.report);
+    followupSection.style.display = "block";
+    hint.textContent = "Loaded from history.";
+  } else {
+    reportSection.style.display = "none";
+    followupSection.style.display = "none";
+    hint.textContent = "This research is still in progress or did not complete. You can start a new one.";
+  }
+
+  followupMessages.innerHTML = "";
+  job.messages.forEach(m => appendFollowupMessage(m.role, m.content));
+
+  loadHistory();
+}
+
+newResearchBtn.addEventListener("click", () => {
+  if (isResearching) return;
+  currentJobId = null;
+  questionEl.value = "";
+  resetCards();
+  reportSection.style.display = "none";
+  followupSection.style.display = "none";
+  followupMessages.innerHTML = "";
+  hint.textContent = "Enter a business question above to begin.";
+});
+
+const MIN_HEIGHT = 54;
+const MAX_HEIGHT = 160;
+
+function autoGrow(el) {
+  el.style.height = MIN_HEIGHT + "px";
+  const newHeight = Math.min(el.scrollHeight, MAX_HEIGHT);
+  el.style.height = newHeight + "px";
+}
+
+questionEl.addEventListener("input", () => autoGrow(questionEl));
+questionEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    submitBtn.click();
+  }
+});
+
+followupInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    followupSendBtn.click();
+  }
+});
+
+function resetCards() {
+  STAGE_ORDER.forEach(stage => {
+    const c = cards[stage];
+    c.className = "agent-card";
+    c.querySelector(".state").textContent = "Idle";
+  });
+}
+
+function applyStage(currentStage) {
+  const currentIndex = STAGE_ORDER.indexOf(currentStage);
+  STAGE_ORDER.forEach((stage, i) => {
+    const c = cards[stage];
+    const stateEl = c.querySelector(".state");
+    if (currentStage === "done") {
+      c.className = "agent-card complete";
+      stateEl.textContent = "Done";
+    } else if (i < currentIndex) {
+      c.className = "agent-card complete";
+      stateEl.textContent = "Done";
+    } else if (i === currentIndex) {
+      c.className = "agent-card active";
+      stateEl.textContent = "Working...";
+    } else {
+      c.className = "agent-card";
+      stateEl.textContent = "Waiting";
+    }
+  });
+}
+
+function setResearching(active) {
+  isResearching = active;
+  submitBtn.disabled = active;
+  newResearchBtn.disabled = active;
+}
+
+async function pollStatus(jobId) {
+  const res = await fetch("/research/status/" + jobId);
+  if (!res.ok) {
+    hint.textContent = "Something went wrong checking status.";
+    setResearching(false);
+    return;
+  }
+  const data = await res.json();
+
+  if (data.status === "error") {
+    hint.textContent = "Research failed: " + data.error;
+    setResearching(false);
+    return;
+  }
+
+  applyStage(data.stage);
+
+  if (data.status === "done") {
+    hint.textContent = "Done.";
+    reportSection.style.display = "block";
+    reportText.innerHTML = marked.parse(data.report);
+    followupSection.style.display = "block";
+    followupMessages.innerHTML = "";
+    setResearching(false);
+    loadHistory();
+    return;
+  }
+
+  setTimeout(() => pollStatus(jobId), 1500);
+}
+
+submitBtn.addEventListener("click", async () => {
+  const question = questionEl.value.trim();
+  if (question.length < 10) {
+    hint.textContent = "Please enter a more complete question (10+ characters).";
+    return;
+  }
+
+  setResearching(true);
+  resetCards();
+  reportSection.style.display = "none";
+  followupSection.style.display = "none";
+  hint.textContent = "Starting agents...";
+
+  const res = await fetch("/research/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    hint.textContent = "Failed to start: " + (err.detail || res.statusText);
+    setResearching(false);
+    return;
+  }
+
+  const data = await res.json();
+  currentJobId = data.job_id;
+  hint.textContent = "Agents are researching your question...";
+  loadHistory();
+  pollStatus(data.job_id);
+});
+
+function appendFollowupMessage(role, content) {
+  const div = document.createElement("div");
+  div.className = "followup-msg " + (role === "user" ? "user" : "assistant");
+  if (role === "user") {
+    div.textContent = content;
+  } else {
+    div.innerHTML = marked.parse(content);
+  }
+  followupMessages.appendChild(div);
+  followupMessages.scrollTop = followupMessages.scrollHeight;
+}
+
+followupSendBtn.addEventListener("click", async () => {
+  const message = followupInput.value.trim();
+  if (!message || !currentJobId) return;
+
+  appendFollowupMessage("user", message);
+  followupInput.value = "";
+  followupSendBtn.disabled = true;
+
+  const res = await fetch("/research/job/" + currentJobId + "/message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+
+  followupSendBtn.disabled = false;
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    appendFollowupMessage("assistant", "Error: " + (err.detail || "Something went wrong."));
+    return;
+  }
+
+  const data = await res.json();
+  appendFollowupMessage("assistant", data.reply);
+});
+</script>
+</body>
+</html>
