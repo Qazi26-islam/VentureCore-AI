@@ -216,6 +216,27 @@
   .report-card li { margin-bottom: 6px; }
   .report-card p { margin: 10px 0; }
   .report-card hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+  .report-card table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 13.5px;
+  }
+  .report-card th, .report-card td {
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .report-card th {
+    background: var(--panel2);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .report-card td { color: var(--text); }
 
   #followup-section { display: none; margin-bottom: 24px; }
   .followup-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
@@ -276,6 +297,8 @@
 
     .report-card { padding: 18px; font-size: 13.5px; }
     .report-card h2 { font-size: 16px; }
+    .report-card table { font-size: 12px; }
+    .report-card th, .report-card td { padding: 7px 8px; }
 
     .followup-card { padding: 14px; }
     .followup-msg { max-width: 92%; font-size: 13px; }
@@ -369,7 +392,7 @@
             </span>
             <span class="gradient-text">Business Research Agents</span>
           </h1>
-          <p>Coordinator → Market Research, Competitor, Financial → Synthesis</p>
+          <p>4 specialist AI agents research your idea, orchestrated automatically behind the scenes</p>
         </header>
 
         <div class="input-row">

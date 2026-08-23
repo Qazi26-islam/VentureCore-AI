@@ -15,6 +15,29 @@ SYSTEM_PROMPT = (
 )
 
 
+def _extract_sources(response) -> list[str]:
+    sources = []
+    try:
+        candidate = response.candidates[0]
+        grounding = getattr(candidate, "grounding_metadata", None)
+        if grounding and grounding.grounding_chunks:
+            for chunk in grounding.grounding_chunks:
+                if chunk.web:
+                    title = chunk.web.title or chunk.web.uri
+                    uri = chunk.web.uri
+                    if uri:
+                        sources.append(f"- [{title}]({uri})")
+    except Exception:
+        pass
+    seen = set()
+    unique = []
+    for s in sources:
+        if s not in seen:
+            seen.add(s)
+            unique.append(s)
+    return unique[:6]
+
+
 def run(question: str) -> str:
     response = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -24,4 +47,8 @@ def run(question: str) -> str:
             tools=[types.Tool(google_search=types.GoogleSearch())],
         ),
     )
-    return response.text
+    text = response.text
+    sources = _extract_sources(response)
+    if sources:
+        text += "\n\n**Sources:**\n" + "\n".join(sources)
+    return text
