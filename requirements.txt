@@ -4,3 +4,5 @@ google-genai>=1.0.0
 python-dotenv==1.0.1
 pydantic==2.9.2
 itsdangerous==2.2.0
+markdown==3.7
+xhtml2pdf==0.2.16

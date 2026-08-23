@@ -1,7 +1,13 @@
 import logging
 import json
+import io
 import threading
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
+import markdown as markdown_lib
+from xhtml2pdf import pisa
+
 from backend.models.schemas import (
     ResearchRequest, StartResponse, StatusResponse,
     HistoryItem, JobDetailResponse, MessageItem,
@@ -30,7 +36,7 @@ def require_login(request: Request) -> int:
 @router.post("/research/start", response_model=StartResponse)
 def start_research(request: Request, body: ResearchRequest) -> StartResponse:
     user_id = get_user_id(request)
-    job_id = jobs.create_job()
+    job_id = jobs.create_job(body.question)
 
     if user_id is not None:
         conn = get_connection()
@@ -123,6 +129,79 @@ def get_job_detail(job_id: str, request: Request):
     )
 
 
+def _get_report_and_question(job_id: str, user_id):
+    if user_id is not None:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+        row = cursor.fetchone()
+        conn.close()
+        if row is None:
+            return None, None
+        return row["question"], row["report"]
+    else:
+        job = jobs.get_job(job_id)
+        if job is None:
+            return None, None
+        return job["question"], job["report"]
+
+
+@router.get("/research/job/{job_id}/pdf")
+def export_pdf(job_id: str, request: Request):
+    user_id = get_user_id(request)
+    question, report = _get_report_and_question(job_id, user_id)
+
+    if question is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not report:
+        raise HTTPException(status_code=400, detail="This report isn't ready yet.")
+
+    body_html = markdown_lib.markdown(report, extensions=["tables"])
+    prepared_date = datetime.now().strftime("%d %B %Y")
+
+    html_content = f"""
+    <html>
+    <head>
+    <style>
+        body {{ font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #1a1a1a; }}
+        h1 {{ color: #5b7cfa; font-size: 20px; margin-bottom: 2px; }}
+        h2 {{ color: #5b7cfa; font-size: 15px; margin-top: 18px; margin-bottom: 6px; }}
+        h3 {{ color: #5b7cfa; font-size: 13px; margin-top: 14px; }}
+        p {{ line-height: 1.5; margin: 6px 0; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+        th, td {{ border: 1px solid #cccccc; padding: 6px 8px; text-align: left; font-size: 10px; }}
+        th {{ background: #f0f0f0; font-weight: bold; }}
+        hr {{ border: none; border-top: 1px solid #cccccc; margin: 16px 0; }}
+        .meta {{ color: #666666; font-size: 10px; margin-bottom: 20px; }}
+        a {{ color: #5b7cfa; }}
+    </style>
+    </head>
+    <body>
+        <h1>VentureCore AI</h1>
+        <div class="meta">
+            Business Intelligence Report<br/>
+            {question}<br/>
+            Prepared: {prepared_date}
+        </div>
+        {body_html}
+    </body>
+    </html>
+    """
+
+    buffer = io.BytesIO()
+    pisa.CreatePDF(html_content, dest=buffer)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+
+    safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in question)[:50].strip() or "report"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.pdf"'},
+    )
+
+
 @router.post("/research/job/{job_id}/message", response_model=FollowUpResponse)
 def send_follow_up(job_id: str, body: FollowUpRequest, request: Request):
     user_id = get_user_id(request)
@@ -148,7 +227,7 @@ def send_follow_up(job_id: str, body: FollowUpRequest, request: Request):
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
         history = job["messages"]
-        question = ""
+        question = job["question"]
         report = job["report"] or ""
 
     try:

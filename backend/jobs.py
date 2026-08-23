@@ -5,10 +5,11 @@ _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
 
 
-def create_job() -> str:
+def create_job(question: str = "") -> str:
     job_id = str(uuid.uuid4())
     with _lock:
         _jobs[job_id] = {
+            "question": question,
             "status": "running",
             "stage": "starting",
             "sections": {},

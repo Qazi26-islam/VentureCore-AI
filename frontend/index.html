@@ -17,6 +17,7 @@
     --accent-glow: rgba(124, 156, 255, 0.35);
     --done: #4ade80;
     --error: #f87171;
+    --warn: #fbbf24;
   }
   * { box-sizing: border-box; }
 
@@ -191,7 +192,8 @@
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
   .agents { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
-  .agent-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 12px; text-align: center; transition: border-color 0.3s, box-shadow 0.3s; }
+  .agent-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 12px; text-align: center; transition: border-color 0.3s, box-shadow 0.3s, transform 0.15s; cursor: pointer; }
+  .agent-card:hover { transform: translateY(-2px); }
   .agent-card .icon { margin-bottom: 8px; display: flex; justify-content: center; }
   .agent-card .icon svg { width: 22px; height: 22px; stroke: var(--muted); transition: stroke 0.3s; }
   .agent-card .name { font-size: 12px; color: var(--muted); font-weight: 600; }
@@ -207,9 +209,120 @@
   .agent-card.error .state { color: var(--error); }
   @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 1px var(--accent-glow), 0 0 24px var(--accent-glow); } 50% { box-shadow: 0 0 0 1px var(--accent-glow), 0 0 40px var(--accent-glow); } }
 
+  #agentModalOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 7, 12, 0.85);
+    backdrop-filter: blur(6px);
+    z-index: 90;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  #agentModalOverlay.visible { display: flex; }
+  .agent-modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: min(600px, 100%);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .agent-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .agent-modal-header h3 { margin: 0; font-size: 16px; color: var(--accent); }
+  .agent-modal-close {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .agent-modal-close:hover { color: var(--text); border-color: var(--muted); }
+  .agent-modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+  .agent-modal-body p { margin: 0 0 10px; }
+  .agent-modal-body strong { color: #fff; }
+  .agent-modal-body ul, .agent-modal-body ol { padding-left: 20px; margin: 10px 0; }
+  .agent-modal-body li { margin-bottom: 6px; }
+  .agent-modal-body a { color: var(--accent); }
+
+  #verdict-section { display: none; margin-bottom: 24px; }
+  .verdict-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+  }
+  .verdict-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .verdict-badge {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    padding: 6px 14px;
+    border-radius: 999px;
+  }
+  .verdict-badge.go { background: rgba(74, 222, 128, 0.15); color: var(--done); border: 1px solid var(--done); }
+  .verdict-badge.caution { background: rgba(251, 191, 36, 0.15); color: var(--warn); border: 1px solid var(--warn); }
+  .verdict-badge.nogo { background: rgba(248, 113, 113, 0.15); color: var(--error); border: 1px solid var(--error); }
+  .verdict-score-big { font-size: 22px; font-weight: 800; color: var(--text); }
+  .verdict-score-big span { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .verdict-bars { display: flex; flex-direction: column; gap: 12px; }
+  .verdict-bar-row { display: flex; align-items: center; gap: 10px; }
+  .verdict-bar-label { width: 150px; flex-shrink: 0; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .verdict-bar-track { flex: 1; height: 8px; border-radius: 6px; background: var(--panel2); overflow: hidden; }
+  .verdict-bar-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #7c9cff, #5b7cfa); width: 0%; transition: width 0.8s ease-out; }
+  .verdict-bar-value { width: 40px; flex-shrink: 0; font-size: 12px; color: var(--text); font-weight: 700; text-align: right; }
+  .verdict-risk { margin-top: 14px; font-size: 12.5px; color: var(--muted); }
+  .verdict-risk strong { color: var(--text); }
+
   #report-section { display: none; margin-bottom: 24px; }
   .report-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 28px; line-height: 1.7; font-size: 14.5px; }
-  .report-card h2 { margin-top: 0; font-size: 18px; color: var(--accent); }
+  .report-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .report-card h2 { margin: 0; font-size: 18px; color: var(--accent); }
+  .export-pdf-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel2);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+    flex-shrink: 0;
+  }
+  .export-pdf-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .export-pdf-btn svg { width: 14px; height: 14px; stroke: currentColor; }
   .report-card h3 { font-size: 15px; color: var(--accent); margin-top: 24px; margin-bottom: 8px; }
   .report-card strong { color: #fff; font-weight: 600; }
   .report-card ul, .report-card ol { padding-left: 20px; margin: 10px 0; }
@@ -299,11 +412,16 @@
     .report-card h2 { font-size: 16px; }
     .report-card table { font-size: 12px; }
     .report-card th, .report-card td { padding: 7px 8px; }
+    .report-card-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .export-pdf-btn { align-self: stretch; justify-content: center; }
 
     .followup-card { padding: 14px; }
     .followup-msg { max-width: 92%; font-size: 13px; }
 
     .auth-card { padding: 24px; }
+
+    .verdict-card { padding: 18px; }
+    .verdict-bar-label { width: 110px; font-size: 11.5px; }
   }
 
   @media (max-width: 420px) {
@@ -350,6 +468,17 @@
       <div class="auth-skip">
         <a id="skipLoginLink">Continue without signing in</a>
       </div>
+    </div>
+  </div>
+
+  <!-- AGENT DETAIL MODAL -->
+  <div id="agentModalOverlay">
+    <div class="agent-modal">
+      <div class="agent-modal-header">
+        <h3 id="agentModalTitle">Agent Output</h3>
+        <button class="agent-modal-close" id="agentModalClose">&times;</button>
+      </div>
+      <div class="agent-modal-body" id="agentModalBody"></div>
     </div>
   </div>
 
@@ -425,9 +554,23 @@
 
         <div class="hint" id="hint">Enter a business question above to begin.</div>
 
+        <div id="verdict-section">
+          <div class="verdict-card" id="verdictCard"></div>
+        </div>
+
         <div id="report-section">
           <div class="report-card">
-            <h2>Final Report</h2>
+            <div class="report-card-header">
+              <h2>Final Report</h2>
+              <button class="export-pdf-btn" id="exportPdfBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Export PDF
+              </button>
+            </div>
             <div id="report-text"></div>
           </div>
         </div>
@@ -453,6 +596,7 @@ let currentJobId = null;
 let authMode = "login";
 let isGuest = false;
 let isResearching = false;
+let currentSections = {};
 
 const authOverlay = document.getElementById("authOverlay");
 const authTitle = document.getElementById("authTitle");
@@ -477,6 +621,12 @@ const newResearchBtn = document.getElementById("newResearchBtn");
 const historyList = document.getElementById("historyList");
 
 const STAGE_ORDER = ["market_research", "competitor_analysis", "financial_analysis", "synthesis"];
+const STAGE_LABELS = {
+  market_research: "Market Research",
+  competitor_analysis: "Competitor Analysis",
+  financial_analysis: "Financial Analysis",
+  synthesis: "Synthesis",
+};
 const cards = {};
 document.querySelectorAll(".agent-card").forEach(c => cards[c.dataset.stage] = c);
 
@@ -485,11 +635,19 @@ const submitBtn = document.getElementById("submitBtn");
 const hint = document.getElementById("hint");
 const reportSection = document.getElementById("report-section");
 const reportText = document.getElementById("report-text");
+const verdictSection = document.getElementById("verdict-section");
+const verdictCard = document.getElementById("verdictCard");
+const exportPdfBtn = document.getElementById("exportPdfBtn");
 
 const followupSection = document.getElementById("followup-section");
 const followupMessages = document.getElementById("followupMessages");
 const followupInput = document.getElementById("followupInput");
 const followupSendBtn = document.getElementById("followupSendBtn");
+
+const agentModalOverlay = document.getElementById("agentModalOverlay");
+const agentModalTitle = document.getElementById("agentModalTitle");
+const agentModalBody = document.getElementById("agentModalBody");
+const agentModalClose = document.getElementById("agentModalClose");
 
 const MOBILE_BREAKPOINT = 760;
 
@@ -525,6 +683,108 @@ window.addEventListener("resize", () => {
     sidebarBackdrop.classList.remove("visible");
   }
 });
+
+// ============== PDF EXPORT ==============
+exportPdfBtn.addEventListener("click", () => {
+  if (!currentJobId) return;
+  window.open("/research/job/" + currentJobId + "/pdf", "_blank");
+});
+
+// ============== AGENT DETAIL MODAL ==============
+Object.keys(cards).forEach(stage => {
+  cards[stage].addEventListener("click", () => {
+    if (stage === "synthesis") {
+      if (reportSection.style.display === "block") {
+        reportSection.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+    const content = currentSections[stage];
+    if (!content) return;
+    agentModalTitle.textContent = STAGE_LABELS[stage];
+    agentModalBody.innerHTML = marked.parse(content);
+    agentModalOverlay.classList.add("visible");
+  });
+});
+
+agentModalClose.addEventListener("click", () => {
+  agentModalOverlay.classList.remove("visible");
+});
+agentModalOverlay.addEventListener("click", (e) => {
+  if (e.target === agentModalOverlay) agentModalOverlay.classList.remove("visible");
+});
+
+// ============== VERDICT PARSING ==============
+function parseVerdict(text) {
+  const oppMatch = text.match(/Opportunity Score:\s*(\d+)\s*\/\s*100/i);
+  const marketMatch = text.match(/Market Attractiveness:\s*([\d.]+)\s*\/\s*10/i);
+  const compMatch = text.match(/Competition Level:\s*([\d.]+)\s*\/\s*10/i);
+  const finMatch = text.match(/Financial Feasibility:\s*([\d.]+)\s*\/\s*10/i);
+  const riskMatch = text.match(/Overall Risk:\s*(Low|Medium|High)/i);
+  const verdictSectionMatch = text.match(/Verdict:?[\s\S]{0,40}?\b(GO|CAUTION|NO-GO)\b/i);
+
+  if (!oppMatch && !verdictSectionMatch) return null;
+
+  return {
+    verdict: verdictSectionMatch ? verdictSectionMatch[1].toUpperCase() : null,
+    opportunity: oppMatch ? parseInt(oppMatch[1]) : null,
+    market: marketMatch ? parseFloat(marketMatch[1]) : null,
+    competition: compMatch ? parseFloat(compMatch[1]) : null,
+    financial: finMatch ? parseFloat(finMatch[1]) : null,
+    risk: riskMatch ? riskMatch[1] : null,
+  };
+}
+
+function renderVerdictCard(text) {
+  const v = parseVerdict(text);
+  if (!v) {
+    verdictSection.style.display = "none";
+    return;
+  }
+
+  let badgeClass = "caution";
+  if (v.verdict === "GO") badgeClass = "go";
+  else if (v.verdict === "NO-GO") badgeClass = "nogo";
+
+  const bars = [];
+  if (v.market !== null) bars.push({ label: "Market Attractiveness", value: v.market, max: 10 });
+  if (v.competition !== null) bars.push({ label: "Competition Level", value: v.competition, max: 10 });
+  if (v.financial !== null) bars.push({ label: "Financial Feasibility", value: v.financial, max: 10 });
+
+  let html = `<div class="verdict-top">`;
+  if (v.verdict) html += `<span class="verdict-badge ${badgeClass}">${v.verdict}</span>`;
+  if (v.opportunity !== null) html += `<span class="verdict-score-big">${v.opportunity}<span>/100 Opportunity Score</span></span>`;
+  html += `</div>`;
+
+  if (bars.length > 0) {
+    html += `<div class="verdict-bars">`;
+    bars.forEach(bar => {
+      const pct = (bar.value / bar.max) * 100;
+      html += `
+        <div class="verdict-bar-row">
+          <div class="verdict-bar-label">${bar.label}</div>
+          <div class="verdict-bar-track"><div class="verdict-bar-fill" style="width:0%" data-target="${pct}"></div></div>
+          <div class="verdict-bar-value">${bar.value}/${bar.max}</div>
+        </div>`;
+    });
+    html += `</div>`;
+  }
+
+  if (v.risk) {
+    html += `<div class="verdict-risk">Overall Risk: <strong>${v.risk}</strong></div>`;
+  }
+
+  verdictCard.innerHTML = html;
+  verdictSection.style.display = "block";
+
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      verdictCard.querySelectorAll(".verdict-bar-fill").forEach(el => {
+        el.style.width = el.dataset.target + "%";
+      });
+    }, 50);
+  });
+}
 
 function setAuthMode(mode) {
   authMode = mode;
@@ -662,6 +922,7 @@ async function loadJob(jobId) {
 
   currentJobId = jobId;
   questionEl.value = job.question;
+  currentSections = job.sections || {};
 
   resetCards();
 
@@ -672,11 +933,13 @@ async function loadJob(jobId) {
     });
     reportSection.style.display = "block";
     reportText.innerHTML = marked.parse(job.report);
+    renderVerdictCard(job.report);
     followupSection.style.display = "block";
     hint.textContent = "Loaded from history.";
   } else {
     reportSection.style.display = "none";
     followupSection.style.display = "none";
+    verdictSection.style.display = "none";
     hint.textContent = "This research is still in progress or did not complete. You can start a new one.";
   }
 
@@ -689,9 +952,11 @@ async function loadJob(jobId) {
 newResearchBtn.addEventListener("click", () => {
   if (isResearching) return;
   currentJobId = null;
+  currentSections = {};
   questionEl.value = "";
   resetCards();
   reportSection.style.display = "none";
+  verdictSection.style.display = "none";
   followupSection.style.display = "none";
   followupMessages.innerHTML = "";
   hint.textContent = "Enter a business question above to begin.";
@@ -773,11 +1038,13 @@ async function pollStatus(jobId) {
   }
 
   applyStage(data.stage);
+  if (data.sections) currentSections = data.sections;
 
   if (data.status === "done") {
     hint.textContent = "Done.";
     reportSection.style.display = "block";
     reportText.innerHTML = marked.parse(data.report);
+    renderVerdictCard(data.report);
     followupSection.style.display = "block";
     followupMessages.innerHTML = "";
     setResearching(false);
@@ -796,8 +1063,10 @@ submitBtn.addEventListener("click", async () => {
   }
 
   setResearching(true);
+  currentSections = {};
   resetCards();
   reportSection.style.display = "none";
+  verdictSection.style.display = "none";
   followupSection.style.display = "none";
   hint.textContent = "Starting agents...";
 
