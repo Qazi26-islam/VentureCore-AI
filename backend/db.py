@@ -29,8 +29,10 @@ def init_db():
             id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
             question TEXT NOT NULL,
+            title TEXT,
             report TEXT,
             sections TEXT,
+            favorite INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
@@ -46,6 +48,13 @@ def init_db():
             FOREIGN KEY (job_id) REFERENCES research_jobs(id)
         )
     """)
+
+    # Add new columns to existing tables if upgrading from an older version
+    existing_cols = [row["name"] for row in cursor.execute("PRAGMA table_info(research_jobs)")]
+    if "title" not in existing_cols:
+        cursor.execute("ALTER TABLE research_jobs ADD COLUMN title TEXT")
+    if "favorite" not in existing_cols:
+        cursor.execute("ALTER TABLE research_jobs ADD COLUMN favorite INTEGER DEFAULT 0")
 
     conn.commit()
     conn.close()

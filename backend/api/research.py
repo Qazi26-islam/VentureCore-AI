@@ -12,6 +12,7 @@ from backend.models.schemas import (
     ResearchRequest, StartResponse, StatusResponse,
     HistoryItem, JobDetailResponse, MessageItem,
     FollowUpRequest, FollowUpResponse,
+    RenameRequest, FavoriteRequest,
 )
 from backend.agents.coordinator import run_research
 from backend.agents import followup
@@ -87,17 +88,38 @@ def get_status(job_id: str) -> StatusResponse:
 
 
 @router.get("/research/history", response_model=list[HistoryItem])
-def get_history(request: Request):
+def get_history(request: Request, q: str = "", favorites_only: bool = False):
     user_id = require_login(request)
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, question, created_at FROM research_jobs WHERE user_id = ? ORDER BY created_at DESC",
-        (user_id,),
-    )
+
+    query = "SELECT id, question, title, favorite, created_at FROM research_jobs WHERE user_id = ?"
+    params = [user_id]
+
+    if q:
+        query += " AND (question LIKE ? OR title LIKE ?)"
+        like = f"%{q}%"
+        params.extend([like, like])
+
+    if favorites_only:
+        query += " AND favorite = 1"
+
+    query += " ORDER BY favorite DESC, created_at DESC"
+
+    cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
-    return [HistoryItem(id=r["id"], question=r["question"], created_at=r["created_at"]) for r in rows]
+
+    return [
+        HistoryItem(
+            id=r["id"],
+            question=r["question"],
+            title=r["title"],
+            favorite=bool(r["favorite"]),
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
 
 
 @router.get("/research/job/{job_id}", response_model=JobDetailResponse)
@@ -123,10 +145,58 @@ def get_job_detail(job_id: str, request: Request):
     return JobDetailResponse(
         id=row["id"],
         question=row["question"],
+        title=row["title"],
+        favorite=bool(row["favorite"]),
         report=row["report"],
         sections=sections,
         messages=messages,
     )
+
+
+@router.put("/research/job/{job_id}/rename")
+def rename_job(job_id: str, body: RenameRequest, request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+    if cursor.fetchone() is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job not found")
+    cursor.execute("UPDATE research_jobs SET title = ? WHERE id = ?", (body.title, job_id))
+    conn.commit()
+    conn.close()
+    return {"status": "renamed"}
+
+
+@router.put("/research/job/{job_id}/favorite")
+def favorite_job(job_id: str, body: FavoriteRequest, request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+    if cursor.fetchone() is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job not found")
+    cursor.execute("UPDATE research_jobs SET favorite = ? WHERE id = ?", (1 if body.favorite else 0, job_id))
+    conn.commit()
+    conn.close()
+    return {"status": "updated"}
+
+
+@router.delete("/research/job/{job_id}")
+def delete_job(job_id: str, request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+    if cursor.fetchone() is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Job not found")
+    cursor.execute("DELETE FROM follow_up_messages WHERE job_id = ?", (job_id,))
+    cursor.execute("DELETE FROM research_jobs WHERE id = ?", (job_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "deleted"}
 
 
 def _get_report_and_question(job_id: str, user_id):

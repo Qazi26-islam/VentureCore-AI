@@ -41,6 +41,8 @@ class UserResponse(BaseModel):
 class HistoryItem(BaseModel):
     id: str
     question: str
+    title: Optional[str] = None
+    favorite: bool = False
     created_at: str
 
 
@@ -52,6 +54,8 @@ class MessageItem(BaseModel):
 class JobDetailResponse(BaseModel):
     id: str
     question: str
+    title: Optional[str] = None
+    favorite: bool = False
     report: Optional[str] = None
     sections: Dict[str, str]
     messages: List[MessageItem]
@@ -63,3 +67,11 @@ class FollowUpRequest(BaseModel):
 
 class FollowUpResponse(BaseModel):
     reply: str
+
+
+class RenameRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=120)
+
+
+class FavoriteRequest(BaseModel):
+    favorite: bool
