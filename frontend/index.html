@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>VentureCore AI</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   :root {
     --bg: #0b0e14;
@@ -192,8 +193,30 @@
   .opp-research-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: border-color 0.2s; }
   .opp-research-btn:hover { border-color: var(--accent); }
   #report-section { display: none; margin-bottom: 24px; }
+  #charts-section { display: none; margin-bottom: 24px; }
+  .charts-heading { margin: 0 0 12px; font-size: 16px; color: var(--accent); }
+  .charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .chart-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; min-height: 280px; }
+  .chart-card.wide { grid-column: 1 / -1; }
+  .chart-title { font-size: 12.5px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+  .chart-wrap { position: relative; height: 230px; }
+  #sources-section { display: none; margin-bottom: 24px; }
+  .sources-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
+  .sources-card h2 { margin: 0 0 6px; color: var(--accent); font-size: 16px; }
+  .sources-subtitle { color: var(--muted); font-size: 12px; margin-bottom: 15px; }
+  .sources-list { display: grid; gap: 8px; }
+  .source-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 11px; background: var(--panel2); border-radius: 10px; }
+  .source-number { color: var(--muted); font-size: 11px; font-weight: 700; }
+  .source-link { color: var(--text); text-decoration: none; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .source-link:hover { color: var(--accent); }
+  .source-quality { font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 3px 8px; white-space: nowrap; }
+  .source-quality.official { color: var(--done); background: rgba(74,222,128,.12); }
+  .source-quality.company { color: var(--accent); background: rgba(124,156,255,.12); }
+  .source-quality.industry { color: var(--warn); background: rgba(251,191,36,.12); }
+  .source-quality.news { color: var(--muted); background: rgba(122,131,153,.12); }
   .report-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 28px; line-height: 1.7; font-size: 14.5px; }
   .report-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .export-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
   .report-card h2 { margin: 0; font-size: 18px; color: var(--accent); }
   .export-pdf-btn { display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: color 0.2s, border-color 0.2s; flex-shrink: 0; }
   .export-pdf-btn:hover { color: var(--accent); border-color: var(--accent); }
@@ -227,6 +250,10 @@
   .hint { text-align: center; color: var(--muted); font-size: 13px; margin-top: 4px; margin-bottom: 20px; }
   .footer { text-align: center; color: var(--muted); font-size: 12px; font-weight: 600; padding-top: 24px; margin-top: auto; }
   @media (max-width: 760px) {
+    .charts-grid { grid-template-columns: 1fr; }
+    .chart-card.wide { grid-column: auto; }
+    .source-row { grid-template-columns: 24px minmax(0, 1fr); }
+    .source-quality { grid-column: 2; justify-self: start; }
     .setup-grid { grid-template-columns: 1fr; }
     .setup-field.full { grid-column: auto; }
     .depth-selector { grid-template-columns: 1fr; }
@@ -418,18 +445,39 @@
 
       <div id="verdict-section"><div class="verdict-card" id="verdictCard"></div></div>
 
+      <section id="charts-section">
+        <h2 class="charts-heading">Research Analytics</h2>
+        <div class="charts-grid">
+          <div class="chart-card" id="marketChartCard"><div class="chart-title">Market Growth Forecast</div><div class="chart-wrap"><canvas id="marketChart"></canvas></div></div>
+          <div class="chart-card" id="competitorChartCard"><div class="chart-title">Competitor Positioning</div><div class="chart-wrap"><canvas id="competitorChart"></canvas></div></div>
+          <div class="chart-card wide" id="financialChartCard"><div class="chart-title">12-Month Revenue vs Expenses</div><div class="chart-wrap"><canvas id="financialChart"></canvas></div></div>
+        </div>
+      </section>
+
+      <section id="sources-section">
+        <div class="sources-card">
+          <h2>Sources & Evidence</h2>
+          <div class="sources-subtitle" id="sourcesSubtitle"></div>
+          <div class="sources-list" id="sourcesList"></div>
+        </div>
+      </section>
+
       <div id="report-section">
         <div class="report-card">
           <div class="report-card-header">
             <h2>Final Report</h2>
+            <div class="export-actions">
             <button class="export-pdf-btn" id="exportPdfBtn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              Export PDF
+              PDF
             </button>
+            <button class="export-pdf-btn" id="exportDocxBtn">Word</button>
+            <button class="export-pdf-btn" id="exportXlsxBtn">Excel</button>
+            </div>
           </div>
           <div id="report-text"></div>
         </div>
@@ -508,9 +556,21 @@ const hint = document.getElementById("hint");
 const agentsGrid = document.getElementById("agentsGrid");
 const reportSection = document.getElementById("report-section");
 const reportText = document.getElementById("report-text");
+const chartsSection = document.getElementById("charts-section");
+const marketChartCard = document.getElementById("marketChartCard");
+const competitorChartCard = document.getElementById("competitorChartCard");
+const financialChartCard = document.getElementById("financialChartCard");
+const sourcesSection = document.getElementById("sources-section");
+const sourcesSubtitle = document.getElementById("sourcesSubtitle");
+const sourcesList = document.getElementById("sourcesList");
+let marketChartInstance = null;
+let competitorChartInstance = null;
+let financialChartInstance = null;
 const verdictSection = document.getElementById("verdict-section");
 const verdictCard = document.getElementById("verdictCard");
 const exportPdfBtn = document.getElementById("exportPdfBtn");
+const exportDocxBtn = document.getElementById("exportDocxBtn");
+const exportXlsxBtn = document.getElementById("exportXlsxBtn");
 const opportunitySection = document.getElementById("opportunity-section");
 const opportunityTableBody = document.getElementById("opportunityTableBody");
 const followupSection = document.getElementById("followup-section");
@@ -601,6 +661,8 @@ exportPdfBtn.addEventListener("click", () => {
   if (!currentJobId) return;
   window.open("/research/job/" + currentJobId + "/pdf", "_blank");
 });
+exportDocxBtn.addEventListener("click", () => { if (currentJobId) window.open("/research/job/" + currentJobId + "/docx", "_blank"); });
+exportXlsxBtn.addEventListener("click", () => { if (currentJobId) window.open("/research/job/" + currentJobId + "/xlsx", "_blank"); });
 
 Object.keys(cards).forEach(stage => {
   cards[stage].addEventListener("click", () => {
@@ -707,6 +769,83 @@ function renderVerdictCard(text) {
       verdictCard.querySelectorAll(".verdict-bar-fill").forEach(el => { el.style.width = el.dataset.target + "%"; });
     }, 50);
   });
+}
+
+function extractChartData(text, marker) {
+  if (!text) return null;
+  const line = text.split("\n").find(item => item.trim().startsWith(marker + ":"));
+  if (!line) return null;
+  try { return JSON.parse(line.slice(line.indexOf(":") + 1).trim()); }
+  catch (error) { console.warn("Invalid chart data for", marker); return null; }
+}
+
+function cleanReportText(text) {
+  return (text || "").replace(/^\s*(MARKET|COMPETITOR|FINANCIAL)_CHART_DATA:\s*\{.*\}\s*$/gm, "").replace(/\n{3,}/g, "\n\n");
+}
+
+function chartOptions(yTitle) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: "#aeb6c8", boxWidth: 12 } } },
+    scales: {
+      x: { ticks: { color: "#7a8399" }, grid: { color: "rgba(122,131,153,.12)" } },
+      y: { beginAtZero: true, title: { display: !!yTitle, text: yTitle || "", color: "#7a8399" }, ticks: { color: "#7a8399" }, grid: { color: "rgba(122,131,153,.12)" } }
+    }
+  };
+}
+
+function renderResearchCharts(sections) {
+  if (typeof Chart === "undefined") { chartsSection.style.display = "none"; return; }
+  [marketChartInstance, competitorChartInstance, financialChartInstance].forEach(chart => { if (chart) chart.destroy(); });
+  marketChartInstance = competitorChartInstance = financialChartInstance = null;
+  const market = extractChartData(sections.market_research, "MARKET_CHART_DATA");
+  const competitor = extractChartData(sections.competitor_analysis, "COMPETITOR_CHART_DATA");
+  const financial = extractChartData(sections.financial_analysis, "FINANCIAL_CHART_DATA");
+  marketChartCard.style.display = market ? "block" : "none";
+  competitorChartCard.style.display = competitor ? "block" : "none";
+  financialChartCard.style.display = financial ? "block" : "none";
+  chartsSection.style.display = market || competitor || financial ? "block" : "none";
+  if (market) marketChartInstance = new Chart(document.getElementById("marketChart"), { type: "line", data: { labels: market.years, datasets: [{ label: market.unit || "Market size", data: market.values, borderColor: "#7c9cff", backgroundColor: "rgba(124,156,255,.18)", fill: true, tension: .3 }] }, options: chartOptions(market.unit) });
+  if (competitor) {
+    const colors = ["#7c9cff", "#4ade80", "#fbbf24"];
+    competitorChartInstance = new Chart(document.getElementById("competitorChart"), { type: "radar", data: { labels: competitor.labels, datasets: competitor.competitors.slice(0, 3).map((item, index) => ({ label: item.name, data: item.scores, borderColor: colors[index], backgroundColor: colors[index] + "22", pointBackgroundColor: colors[index] })) }, options: { responsive: true, maintainAspectRatio: false, scales: { r: { min: 0, max: 10, ticks: { display: false }, angleLines: { color: "rgba(122,131,153,.25)" }, grid: { color: "rgba(122,131,153,.2)" }, pointLabels: { color: "#aeb6c8" } } }, plugins: { legend: { labels: { color: "#aeb6c8", boxWidth: 12 } } } } });
+  }
+  if (financial) financialChartInstance = new Chart(document.getElementById("financialChart"), { type: "line", data: { labels: financial.months.map(month => "M" + month), datasets: [{ label: "Revenue", data: financial.revenue, borderColor: "#4ade80", backgroundColor: "rgba(74,222,128,.12)", tension: .25 }, { label: "Expenses", data: financial.expenses, borderColor: "#f87171", backgroundColor: "rgba(248,113,113,.12)", tension: .25 }] }, options: chartOptions(financial.currency) });
+}
+
+function classifySource(url) {
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase(); } catch (error) { return { label: "Web source", type: "news" }; }
+  if (/\.gov\.|\.gov$|\.edu\.|\.edu$|who\.int|worldbank\.org|oecd\.org|un\.org|europa\.eu|mdec\.my/.test(host)) return { label: "Official / Government", type: "official" };
+  if (/statista|grandviewresearch|mckinsey|gartner|forrester|deloitte|pwc|ey\.com|kpmg/.test(host)) return { label: "Industry Report", type: "industry" };
+  if (/reuters|bloomberg|forbes|techcrunch|bbc|cnn|news|medium|blog/.test(host)) return { label: "News / Blog", type: "news" };
+  return { label: "Company / Primary", type: "company" };
+}
+
+function renderSources(sections) {
+  const combined = Object.values(sections || {}).join("\n");
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+  const sources = [];
+  const seen = new Set();
+  let match;
+  while ((match = pattern.exec(combined)) !== null) {
+    if (!seen.has(match[2])) { seen.add(match[2]); sources.push({ title: match[1], url: match[2] }); }
+  }
+  sourcesList.innerHTML = "";
+  if (!sources.length) { sourcesSection.style.display = "none"; return; }
+  const officialCount = sources.filter(source => classifySource(source.url).type === "official").length;
+  sourcesSubtitle.textContent = sources.length + " verified links · " + officialCount + " official or government sources";
+  sources.forEach((source, index) => {
+    const quality = classifySource(source.url);
+    const row = document.createElement("div"); row.className = "source-row";
+    const number = document.createElement("span"); number.className = "source-number"; number.textContent = "[" + (index + 1) + "]";
+    const link = document.createElement("a"); link.className = "source-link"; link.href = source.url; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = source.title;
+    const badge = document.createElement("span"); badge.className = "source-quality " + quality.type; badge.textContent = quality.label;
+    row.append(number, link, badge); sourcesList.appendChild(row);
+  });
+  sourcesSection.style.display = "block";
 }
 
 function switchToMarketModeWithQuestion(opportunityName) {
@@ -912,12 +1051,16 @@ async function loadJob(jobId) {
   if (job.report) {
     STAGE_ORDER.forEach(stage => { cards[stage].className = "agent-card complete"; cards[stage].querySelector(".state").textContent = "Done"; });
     reportSection.style.display = "block";
-    reportText.innerHTML = marked.parse(job.report);
+    reportText.innerHTML = marked.parse(cleanReportText(job.report));
     renderVerdictCard(job.report);
+    renderResearchCharts(currentSections);
+    renderSources(currentSections);
     followupSection.style.display = "block";
     hint.textContent = "Loaded from history.";
   } else {
     reportSection.style.display = "none";
+    chartsSection.style.display = "none";
+    sourcesSection.style.display = "none";
     followupSection.style.display = "none";
     verdictSection.style.display = "none";
     hint.textContent = "This research is still in progress or did not complete. You can start a new one.";
@@ -937,6 +1080,8 @@ newResearchBtn.addEventListener("click", () => {
   document.querySelector('input[name="researchDepth"][value="standard"]').checked = true;
   resetCards();
   reportSection.style.display = "none";
+  chartsSection.style.display = "none";
+  sourcesSection.style.display = "none";
   verdictSection.style.display = "none";
   followupSection.style.display = "none";
   opportunitySection.style.display = "none";
@@ -988,8 +1133,10 @@ async function pollStatus(jobId) {
   if (data.status === "done") {
     hint.textContent = "Done.";
     reportSection.style.display = "block";
-    reportText.innerHTML = marked.parse(data.report);
+    reportText.innerHTML = marked.parse(cleanReportText(data.report));
     renderVerdictCard(data.report);
+    renderResearchCharts(currentSections);
+    renderSources(currentSections);
     followupSection.style.display = "block";
     followupMessages.innerHTML = "";
     setResearching(false);
@@ -1005,6 +1152,8 @@ submitBtn.addEventListener("click", async () => {
     if (question.length < 10) { hint.textContent = "Please describe your interest in more detail (10+ characters)."; return; }
     opportunitySection.style.display = "none";
     reportSection.style.display = "none";
+    chartsSection.style.display = "none";
+    sourcesSection.style.display = "none";
     verdictSection.style.display = "none";
     followupSection.style.display = "none";
     await findOpportunities(question);
@@ -1021,6 +1170,8 @@ submitBtn.addEventListener("click", async () => {
   currentSections = {};
   resetCards();
   reportSection.style.display = "none";
+  chartsSection.style.display = "none";
+  sourcesSection.style.display = "none";
   verdictSection.style.display = "none";
   followupSection.style.display = "none";
   opportunitySection.style.display = "none";
