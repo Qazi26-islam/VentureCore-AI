@@ -51,7 +51,7 @@ def start_research(request: Request, body: ResearchRequest) -> StartResponse:
 
     def _background_run():
         try:
-            run_research(body.question, job_id)
+            run_research(body.question, job_id, mode=body.mode, depth=body.depth)
             if user_id is not None:
                 job = jobs.get_job(job_id)
                 conn2 = get_connection()
@@ -197,6 +197,16 @@ def delete_job(job_id: str, request: Request):
     conn.commit()
     conn.close()
     return {"status": "deleted"}
+
+
+from backend.agents import opportunity_finder
+from backend.models.schemas import OpportunityRequest, OpportunityResponse, OpportunityItem
+
+
+@router.post("/research/opportunities", response_model=OpportunityResponse)
+def find_opportunities(body: OpportunityRequest):
+    items = opportunity_finder.run(body.query)
+    return OpportunityResponse(items=[OpportunityItem(**item) for item in items])
 
 
 def _get_report_and_question(job_id: str, user_id):

@@ -5,7 +5,18 @@ from backend.config import GEMINI_API_KEY
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-SYSTEM_PROMPT = (
+QUICK_PROMPT = (
+    "You are a Synthesis Agent. You will be given quick-scan research from "
+    "three specialist agents about the same business question. Combine "
+    "them into a short report: for each of the three sections, a bold "
+    "label on its own line (e.g. '**Market Research:**') followed by "
+    "their finding. After all three, add a '**Verdict:**' header with "
+    "GO, CAUTION, or NO-GO in bold, an Opportunity Score: X/100, and one "
+    "sentence explaining why. Keep the whole thing short — this is a "
+    "quick scan, not a deep report."
+)
+
+BASE_PROMPT = (
     "You are a Synthesis Agent acting like a business consultant. You will "
     "be given research from three specialist agents: Market Research, "
     "Competitor Analysis, and Financial Analysis, all about the same "
@@ -35,15 +46,49 @@ SYSTEM_PROMPT = (
     "Competition Level: X/10\n"
     "Financial Feasibility: X/10\n"
     "Overall Risk: Low, Medium, or High\n"
-    "Then a short 2-3 sentence explanation tying it together. Base all "
-    "scores on reasoned judgment from the research provided, not arbitrary "
-    "numbers — a saturated competitive market or high startup cost should "
-    "lower scores accordingly, strong demand and low competition should "
-    "raise them."
+    "Then a short 2-3 sentence explanation tying it together."
+)
+
+DEEP_ADDON = (
+    " This is a DEEP RESEARCH request — make the explanation under the "
+    "Verdict noticeably more thorough (4-6 sentences), explicitly "
+    "referencing specific facts from the research above rather than "
+    "generic statements."
+)
+
+VALIDATOR_ADDON = (
+    "\n\n4. After another divider, add a '**Venture Score:**' header "
+    "specifically for validating this as a standalone business idea "
+    "(distinct from the general Verdict above). Give exactly these five "
+    "ratings, each on its own line:\n"
+    "Demand: X/10\n"
+    "Competition: X/10\n"
+    "Profitability: X/10\n"
+    "Scalability: X/10\n"
+    "Risk: X/10\n"
+    "Then a one-line bolded verdict phrase such as '**Promising opportunity "
+    "— proceed with validation.**' or '**High risk — needs significant "
+    "de-risking before proceeding.**' matching the actual scores."
+)
+
+SCORING_NOTE = (
+    " Base all scores on reasoned judgment from the research provided, not "
+    "arbitrary numbers — a saturated competitive market or high startup "
+    "cost should lower scores accordingly, strong demand and low "
+    "competition should raise them."
 )
 
 
-def run(question: str, market: str, competitor: str, financial: str) -> str:
+def run(question: str, market: str, competitor: str, financial: str, mode: str = "market", depth: str = "standard") -> str:
+    if depth == "quick":
+        system_prompt = QUICK_PROMPT
+    else:
+        system_prompt = BASE_PROMPT + SCORING_NOTE
+        if depth == "deep":
+            system_prompt += DEEP_ADDON
+        if mode == "validate":
+            system_prompt += VALIDATOR_ADDON
+
     combined_input = (
         f"Original question: {question}\n\n"
         f"--- Market Research ---\n{market}\n\n"
@@ -55,7 +100,7 @@ def run(question: str, market: str, competitor: str, financial: str) -> str:
         model="gemini-3.5-flash-lite",
         contents=combined_input,
         config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=system_prompt,
         ),
     )
     return response.text

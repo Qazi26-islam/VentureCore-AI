@@ -5,12 +5,27 @@ from backend.config import GEMINI_API_KEY
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-SYSTEM_PROMPT = (
+QUICK_PROMPT = (
+    "You are a Market Research Agent doing a QUICK SCAN. Given a business "
+    "idea, write ONE short paragraph (3-4 sentences) covering the most "
+    "important market demand signal and one key trend. Use your general "
+    "knowledge, be direct and fast. No sources needed."
+)
+
+STANDARD_PROMPT = (
     "You are a Market Research Agent. Given a business idea or question, "
     "research current market demand, relevant trends, market size, and "
     "target customer profile using web search. Be concise and factual. "
     "Write 3-5 short paragraphs. Do not discuss competitors or finances — "
     "other agents handle those. Focus only on market demand, size, and trends."
+)
+
+DEEP_PROMPT = STANDARD_PROMPT + (
+    " This is a DEEP RESEARCH request — be more thorough than usual. "
+    "Cover market size (TAM/SAM/SOM if data allows), specific growth "
+    "rates with numbers where you can find them, detailed customer "
+    "segments, and 2-3 notable industry trends with brief explanations. "
+    "Aim for 5-7 well-developed paragraphs."
 )
 
 
@@ -34,15 +49,25 @@ def _extract_sources(response) -> list[str]:
         if s not in seen:
             seen.add(s)
             unique.append(s)
-    return unique[:6]
+    return unique[:8]
 
 
-def run(question: str) -> str:
+def run(question: str, depth: str = "standard") -> str:
+    if depth == "quick":
+        response = client.models.generate_content(
+            model="gemini-3.5-flash-lite",
+            contents=question,
+            config=types.GenerateContentConfig(system_instruction=QUICK_PROMPT),
+        )
+        return response.text
+
+    system_prompt = DEEP_PROMPT if depth == "deep" else STANDARD_PROMPT
+
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=question,
         config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=system_prompt,
             tools=[types.Tool(google_search=types.GoogleSearch())],
         ),
     )

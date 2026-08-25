@@ -6,9 +6,11 @@ class ResearchRequest(BaseModel):
     question: str = Field(
         ...,
         min_length=10,
-        max_length=500,
+        max_length=2000,
         description="A business question, at least 10 characters.",
     )
+    mode: str = Field(default="market", description="'market' or 'validate'")
+    depth: str = Field(default="standard", description="'quick', 'standard', or 'deep'")
 
 
 class StartResponse(BaseModel):
@@ -75,3 +77,18 @@ class RenameRequest(BaseModel):
 
 class FavoriteRequest(BaseModel):
     favorite: bool
+
+
+class OpportunityRequest(BaseModel):
+    query: str = Field(..., min_length=10, max_length=300)
+
+
+class OpportunityItem(BaseModel):
+    opportunity: str
+    market: str
+    difficulty: str
+    potential: int
+
+
+class OpportunityResponse(BaseModel):
+    items: List[OpportunityItem]

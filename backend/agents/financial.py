@@ -5,7 +5,14 @@ from backend.config import GEMINI_API_KEY
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-SYSTEM_PROMPT = (
+QUICK_PROMPT = (
+    "You are a Financial Analysis Agent doing a QUICK SCAN. Given a "
+    "business idea, write ONE short paragraph with a rough ballpark "
+    "startup cost range and typical margin for this type of business. No "
+    "table, be fast and direct. Make clear this is a very rough estimate."
+)
+
+STANDARD_PROMPT = (
     "You are a Financial Analysis Agent. Given a business idea or question, "
     "give a rough, honest estimate of the financial picture. Be clear this "
     "is a rough estimate, not a formal projection.\n\n"
@@ -24,13 +31,26 @@ SYSTEM_PROMPT = (
     "Do not discuss market trends or competitors — other agents handle those."
 )
 
+DEEP_PROMPT = STANDARD_PROMPT + (
+    " This is a DEEP RESEARCH request — add one more row to the table for "
+    "Year-1 Cumulative Profit/Loss, and after the table add a short "
+    "paragraph on the biggest financial risk for this specific business."
+)
 
-def run(question: str) -> str:
+
+def run(question: str, depth: str = "standard") -> str:
+    if depth == "quick":
+        system_prompt = QUICK_PROMPT
+    elif depth == "deep":
+        system_prompt = DEEP_PROMPT
+    else:
+        system_prompt = STANDARD_PROMPT
+
     response = client.models.generate_content(
         model="gemini-3.5-flash-lite",
         contents=question,
         config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=system_prompt,
         ),
     )
     return response.text
