@@ -26,6 +26,7 @@ from backend.models.schemas import (
     DataQualityResponse,
     SupplierRequest, SupplierItem, ProductRequest, StockMovementRequest, InventoryItem,
     InventoryQuestionRequest, InventoryQuestionResponse,
+    CustomerRequest, CustomerItem, SaleRequest, SaleRecord, SalesDashboardResponse,
 )
 from backend.agents.coordinator import run_research
 from backend.agents import followup, inventory as inventory_agent
@@ -309,6 +310,139 @@ def ask_inventory_agent(body: InventoryQuestionRequest, request: Request):
         logger.exception("Inventory Agent failed: %s", exc)
         raise HTTPException(status_code=502, detail="The Inventory Agent is temporarily unavailable. Please try again.")
     return InventoryQuestionResponse(answer=answer)
+
+
+@router.post("/sales/customers")
+def create_customer(body: CustomerRequest, request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    cursor = conn.execute(
+        """INSERT INTO customers (user_id, name, email, phone, segment, notes)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (user_id, body.name, body.email, body.phone, body.segment, body.notes),
+    )
+    conn.commit()
+    customer_id = cursor.lastrowid
+    conn.close()
+    return {"id": customer_id, "status": "created"}
+
+
+@router.get("/sales/customers", response_model=list[CustomerItem])
+def list_customers(request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT id, name, email, phone, segment, notes
+           FROM customers WHERE user_id = ? ORDER BY name COLLATE NOCASE""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return [CustomerItem(**dict(row)) for row in rows]
+
+
+@router.post("/sales/orders", response_model=SaleRecord)
+def record_sale(body: SaleRequest, request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    product = conn.execute(
+        "SELECT id, name, selling_price FROM products WHERE id = ? AND user_id = ? AND active = 1",
+        (body.product_id, user_id),
+    ).fetchone()
+    if product is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Product not found.")
+    customer_name = None
+    if body.customer_id is not None:
+        customer = conn.execute(
+            "SELECT id, name FROM customers WHERE id = ? AND user_id = ?",
+            (body.customer_id, user_id),
+        ).fetchone()
+        if customer is None:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Customer not found.")
+        customer_name = customer["name"]
+    if body.due_date:
+        try:
+            datetime.strptime(body.due_date, "%Y-%m-%d")
+        except ValueError:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Due date must use YYYY-MM-DD format.")
+    current_stock = float(conn.execute(
+        "SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_transactions WHERE product_id = ?",
+        (body.product_id,),
+    ).fetchone()[0])
+    if body.quantity > current_stock:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"Not enough stock. Current stock is {current_stock}.")
+    unit_price = float(body.unit_price if body.unit_price is not None else product["selling_price"])
+    total_amount = round(body.quantity * unit_price, 2)
+    cursor = conn.execute(
+        """INSERT INTO sales_orders
+           (user_id, customer_id, product_id, quantity, unit_price, total_amount, payment_status, due_date, reference_note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (user_id, body.customer_id, body.product_id, body.quantity, unit_price, total_amount,
+         body.payment_status, body.due_date or None, body.reference_note),
+    )
+    sale_id = cursor.lastrowid
+    conn.execute(
+        """INSERT INTO inventory_transactions
+           (product_id, user_id, transaction_type, quantity_change, unit_cost, reference_note)
+           VALUES (?, ?, 'sold', ?, NULL, ?)""",
+        (body.product_id, user_id, -body.quantity, f"Sale #{sale_id}: {body.reference_note}".strip()),
+    )
+    conn.commit()
+    row = conn.execute("SELECT created_at FROM sales_orders WHERE id = ?", (sale_id,)).fetchone()
+    conn.close()
+    effective_status = "overdue" if body.payment_status == "due" and body.due_date and body.due_date < datetime.now().strftime("%Y-%m-%d") else body.payment_status
+    return SaleRecord(
+        id=sale_id, customer_name=customer_name, product_name=product["name"], quantity=body.quantity,
+        unit_price=unit_price, total_amount=total_amount, payment_status=effective_status,
+        due_date=body.due_date, created_at=row["created_at"],
+    )
+
+
+@router.get("/sales/dashboard", response_model=SalesDashboardResponse)
+def sales_dashboard(request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    totals = conn.execute(
+        """SELECT
+             COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-30 days') THEN total_amount ELSE 0 END), 0) AS revenue_30d,
+             COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-30 days') AND payment_status = 'paid' THEN total_amount ELSE 0 END), 0) AS cash_collected_30d,
+             COALESCE(SUM(CASE WHEN payment_status != 'paid' THEN total_amount ELSE 0 END), 0) AS outstanding_amount,
+             SUM(CASE WHEN created_at >= datetime('now', '-30 days') THEN 1 ELSE 0 END) AS orders_30d
+           FROM sales_orders WHERE user_id = ?""",
+        (user_id,),
+    ).fetchone()
+    top_customer_row = conn.execute(
+        """SELECT c.name, SUM(s.total_amount) AS total
+           FROM sales_orders s JOIN customers c ON c.id = s.customer_id
+           WHERE s.user_id = ? AND s.created_at >= datetime('now', '-30 days')
+           GROUP BY c.id ORDER BY total DESC LIMIT 1""",
+        (user_id,),
+    ).fetchone()
+    rows = conn.execute(
+        """SELECT s.id, c.name AS customer_name, p.name AS product_name, s.quantity,
+                  s.unit_price, s.total_amount,
+                  CASE WHEN s.payment_status != 'paid' AND s.due_date IS NOT NULL
+                         AND date(s.due_date) < date('now') THEN 'overdue'
+                       ELSE s.payment_status END AS payment_status,
+                  s.due_date, s.created_at
+           FROM sales_orders s
+           JOIN products p ON p.id = s.product_id
+           LEFT JOIN customers c ON c.id = s.customer_id
+           WHERE s.user_id = ? ORDER BY s.created_at DESC, s.id DESC LIMIT 20""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return SalesDashboardResponse(
+        revenue_30d=round(float(totals["revenue_30d"]), 2),
+        cash_collected_30d=round(float(totals["cash_collected_30d"]), 2),
+        outstanding_amount=round(float(totals["outstanding_amount"]), 2),
+        orders_30d=int(totals["orders_30d"] or 0),
+        top_customer=top_customer_row["name"] if top_customer_row else None,
+        recent_sales=[SaleRecord(**dict(row)) for row in rows],
+    )
 
 
 @router.post("/research/start", response_model=StartResponse)

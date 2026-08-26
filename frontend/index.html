@@ -62,13 +62,16 @@
   .data-btn:hover { border-color: var(--accent); color: var(--accent); }
   .inventory-btn { width:100%; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:12px; font-weight:600; cursor:pointer; margin-bottom:8px; }
   .inventory-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .sales-btn { width:100%; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:12px; font-weight:600; cursor:pointer; margin-bottom:8px; }
+  .sales-btn:hover { border-color:var(--accent); color:var(--accent); }
   .company-use { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: -4px 0 14px; cursor: pointer; }
   #companyModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
   #companyModalOverlay.visible { display: flex; }
-  #dataModalOverlay, #inventoryModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
-  #dataModalOverlay.visible, #inventoryModalOverlay.visible { display: flex; }
+  #dataModalOverlay, #inventoryModalOverlay, #salesModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
+  #dataModalOverlay.visible, #inventoryModalOverlay.visible, #salesModalOverlay.visible { display: flex; }
   .company-modal { width: min(680px, 100%); max-height: 88vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
   #inventoryModalOverlay .company-modal { width:min(1080px, 100%); }
+  #salesModalOverlay .company-modal { width:min(980px, 100%); }
   .company-modal h2 { margin: 0 0 4px; font-size: 18px; }
   .company-modal p { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
   .company-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
@@ -109,6 +112,14 @@
   .inventory-ai-input { display:flex; gap:8px; align-items:flex-end; }
   .inventory-ai-input textarea { flex:1; min-height:44px; max-height:100px; resize:vertical; border:1px solid var(--border); background:var(--panel2); color:var(--text); padding:10px; border-radius:9px; font:inherit; font-size:13px; }
   .inventory-ai-answer { display:none; margin-top:12px; padding:12px; border-radius:9px; background:var(--panel2); color:var(--text); white-space:pre-wrap; font-size:12.5px; line-height:1.6; }
+  .sales-summary { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin:14px 0; }
+  .sales-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .sales-table th,.sales-table td { text-align:left; border-bottom:1px solid var(--border); padding:9px 6px; }
+  .sales-table th { color:var(--muted); font-size:10.5px; text-transform:uppercase; }
+  .payment-status { font-size:10px; font-weight:700; border-radius:999px; padding:3px 7px; text-transform:capitalize; }
+  .payment-status.paid { color:var(--done); background:rgba(74,222,128,.12); }
+  .payment-status.due { color:var(--warn); background:rgba(251,191,36,.12); }
+  .payment-status.overdue { color:var(--error); background:rgba(248,113,113,.12); }
   .new-research-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .new-research-btn:disabled:hover { border-color: var(--border); }
   .history-search { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 12px; margin-bottom: 10px; flex-shrink: 0; }
@@ -311,6 +322,7 @@
     .company-form-grid { grid-template-columns: 1fr; }
     .company-form-grid .full { grid-column:auto; }
     .inventory-summary { grid-template-columns:1fr; }
+    .sales-summary { grid-template-columns:1fr; }
     .setup-field.full { grid-column: auto; }
     .depth-selector { grid-template-columns: 1fr; }
     .sidebar { position: fixed; top: 0; left: 0; z-index: 40; background: var(--bg); box-shadow: 4px 0 24px rgba(0,0,0,0.5); width: min(240px, 78vw); }
@@ -476,6 +488,41 @@
   </div>
 </div>
 
+<div id="salesModalOverlay">
+  <div class="company-modal">
+    <h2>Sales &amp; CRM</h2>
+    <p>Manage customers, record sales, track unpaid revenue, and keep Inventory synchronized automatically.</p>
+    <div class="inventory-section">
+      <h3>Add a customer</h3>
+      <div class="company-form-grid">
+        <div><label>Customer name *</label><input id="customerName" placeholder="Acme Retail"></div>
+        <div><label>Email</label><input id="customerEmail" type="email" placeholder="buyer@company.com"></div>
+        <div><label>Phone</label><input id="customerPhone" placeholder="+60..."></div>
+        <div><label>Customer segment</label><input id="customerSegment" placeholder="Wholesale, VIP, Retail..."></div>
+      </div>
+      <div class="company-modal-actions"><button class="export-pdf-btn" id="customerAddBtn">Add Customer</button></div>
+      <div class="supplier-list" id="customerList"><span class="supplier-chip">No customers yet</span></div>
+    </div>
+    <div class="inventory-section">
+      <h3>Record a sale</h3>
+      <div class="inventory-section-note">Recording a sale automatically deducts the quantity from Inventory.</div>
+      <div class="company-form-grid">
+        <div><label>Product *</label><select id="saleProduct"><option value="">Choose product</option></select></div>
+        <div><label>Customer</label><select id="saleCustomer"><option value="">Walk-in / no customer</option></select></div>
+        <div><label>Quantity *</label><input id="saleQuantity" type="number" min="0.01" step="0.01" placeholder="1"></div>
+        <div><label>Unit selling price</label><input id="saleUnitPrice" type="number" min="0" step="0.01" placeholder="Uses product price"></div>
+        <div><label>Payment status</label><select id="salePaymentStatus"><option value="paid">Paid</option><option value="due">Payment due</option></select></div>
+        <div><label>Due date</label><input id="saleDueDate" type="date"></div>
+        <div class="full"><label>Reference / note</label><input id="saleReference" placeholder="Invoice number or optional note"></div>
+      </div>
+      <div class="company-modal-actions"><button class="primary" id="saleAddBtn" style="padding:10px 15px;">Record Sale</button></div>
+    </div>
+    <div class="sales-summary" id="salesSummary"></div>
+    <div style="overflow:auto;"><table class="sales-table"><thead><tr><th>Date</th><th>Customer</th><th>Product</th><th>Quantity</th><th>Total</th><th>Payment</th></tr></thead><tbody id="salesTableBody"></tbody></table></div>
+    <div class="company-modal-actions"><button class="export-pdf-btn" id="salesCloseBtn">Close</button></div>
+  </div>
+</div>
+
 <div class="app-layout">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-inner">
@@ -487,6 +534,7 @@
       <button class="new-research-btn" id="newResearchBtn">+ New Research</button>
       <button class="company-btn" id="companyProfileBtn">My Company</button>
       <button class="inventory-btn" id="inventoryOpenBtn">Inventory</button>
+      <button class="sales-btn" id="salesOpenBtn">Sales &amp; CRM</button>
       <button class="data-btn" id="dataCheckOpenBtn">Check Business Data</button>
       <input type="text" class="history-search" id="historySearch" placeholder="Search research...">
       <div class="history-label">
@@ -672,6 +720,7 @@ const logoutBtn = document.getElementById("logoutBtn");
 const newResearchBtn = document.getElementById("newResearchBtn");
 const companyProfileBtn = document.getElementById("companyProfileBtn");
 const inventoryOpenBtn = document.getElementById("inventoryOpenBtn");
+const salesOpenBtn = document.getElementById("salesOpenBtn");
 const dataCheckOpenBtn = document.getElementById("dataCheckOpenBtn");
 const companyModalOverlay = document.getElementById("companyModalOverlay");
 const companyUseRow = document.getElementById("companyUseRow");
@@ -699,6 +748,24 @@ const productSupplier = document.getElementById("productSupplier");
 const inventoryQuestion = document.getElementById("inventoryQuestion");
 const inventoryAskBtn = document.getElementById("inventoryAskBtn");
 const inventoryAiAnswer = document.getElementById("inventoryAiAnswer");
+const salesModalOverlay = document.getElementById("salesModalOverlay");
+const salesCloseBtn = document.getElementById("salesCloseBtn");
+const customerAddBtn = document.getElementById("customerAddBtn");
+const customerList = document.getElementById("customerList");
+const customerName = document.getElementById("customerName");
+const customerEmail = document.getElementById("customerEmail");
+const customerPhone = document.getElementById("customerPhone");
+const customerSegment = document.getElementById("customerSegment");
+const saleProduct = document.getElementById("saleProduct");
+const saleCustomer = document.getElementById("saleCustomer");
+const saleQuantity = document.getElementById("saleQuantity");
+const saleUnitPrice = document.getElementById("saleUnitPrice");
+const salePaymentStatus = document.getElementById("salePaymentStatus");
+const saleDueDate = document.getElementById("saleDueDate");
+const saleReference = document.getElementById("saleReference");
+const saleAddBtn = document.getElementById("saleAddBtn");
+const salesSummary = document.getElementById("salesSummary");
+const salesTableBody = document.getElementById("salesTableBody");
 const productFields = { name: document.getElementById("productName"), sku: document.getElementById("productSku"), category: document.getElementById("productCategory"), unit_cost: document.getElementById("productCost"), selling_price: document.getElementById("productPrice"), reorder_point: document.getElementById("productReorder"), lead_time_days: document.getElementById("productLeadTime") };
 const historyList = document.getElementById("historyList");
 const historySearch = document.getElementById("historySearch");
@@ -833,6 +900,7 @@ companySaveBtn.addEventListener("click", async () => {
 dataCheckOpenBtn.addEventListener("click", () => {
   if (isGuest) { authOverlay.style.display = "flex"; return; }
   inventoryModalOverlay.classList.remove("visible");
+  salesModalOverlay.classList.remove("visible");
   qualityResult.style.display = "none";
   dataModalOverlay.classList.add("visible");
 });
@@ -909,7 +977,7 @@ async function recordStockMovement(item, transactionType) {
   if (!res.ok) { alert(data.detail || "Could not record stock movement."); return; }
   loadInventory();
 }
-inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } dataModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.add("visible"); await Promise.all([loadSuppliers(), loadInventory()]); });
+inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } dataModalOverlay.classList.remove("visible"); salesModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.add("visible"); await Promise.all([loadSuppliers(), loadInventory()]); });
 inventoryCloseBtn.addEventListener("click", () => inventoryModalOverlay.classList.remove("visible"));
 inventoryModalOverlay.addEventListener("click", event => { if (event.target === inventoryModalOverlay) inventoryModalOverlay.classList.remove("visible"); });
 supplierAddBtn.addEventListener("click", async () => {
@@ -938,6 +1006,69 @@ productAddBtn.addEventListener("click", async () => {
   if (!res.ok) { alert(data.detail || "Could not add product."); return; }
   Object.values(productFields).forEach(field => { if (field.id !== "productLeadTime") field.value = ""; });
   productSupplier.value = ""; productFields.lead_time_days.value = 7; await loadInventory();
+});
+
+async function loadSalesWorkspace() {
+  const [customersRes, productsRes, dashboardRes] = await Promise.all([
+    fetch("/sales/customers"), fetch("/inventory/dashboard"), fetch("/sales/dashboard")
+  ]);
+  if (!customersRes.ok || !productsRes.ok || !dashboardRes.ok) {
+    salesTableBody.innerHTML = '<tr><td colspan="6">Could not load Sales &amp; CRM.</td></tr>';
+    return;
+  }
+  const customers = await customersRes.json();
+  const products = await productsRes.json();
+  const dashboard = await dashboardRes.json();
+  saleCustomer.innerHTML = '<option value="">Walk-in / no customer</option>' + customers.map(customer => '<option value="' + customer.id + '">' + escapeHtml(customer.name) + '</option>').join("");
+  customerList.innerHTML = customers.length ? customers.map(customer => '<span class="supplier-chip"><strong>' + escapeHtml(customer.name) + '</strong>' + (customer.segment ? ' · ' + escapeHtml(customer.segment) : '') + '</span>').join("") : '<span class="supplier-chip">No customers yet</span>';
+  saleProduct.innerHTML = '<option value="">Choose product</option>' + products.map(product => '<option value="' + product.id + '" data-price="' + product.selling_price + '">' + escapeHtml(product.name) + ' · ' + product.current_stock + ' in stock</option>').join("");
+  salesSummary.innerHTML = '<div class="inventory-stat"><span>30-day revenue</span><strong>' + currency(dashboard.revenue_30d) + '</strong></div><div class="inventory-stat"><span>Cash collected</span><strong>' + currency(dashboard.cash_collected_30d) + '</strong></div><div class="inventory-stat"><span>Outstanding</span><strong>' + currency(dashboard.outstanding_amount) + '</strong></div><div class="inventory-stat"><span>Orders</span><strong>' + dashboard.orders_30d + '</strong></div><div class="inventory-stat"><span>Top customer</span><strong>' + escapeHtml(dashboard.top_customer || "Not enough data") + '</strong></div>';
+  salesTableBody.innerHTML = dashboard.recent_sales.length ? dashboard.recent_sales.map(sale => '<tr><td>' + escapeHtml(sale.created_at.slice(0, 10)) + '</td><td>' + escapeHtml(sale.customer_name || "Walk-in") + '</td><td>' + escapeHtml(sale.product_name) + '</td><td>' + sale.quantity + '</td><td>' + currency(sale.total_amount) + '</td><td><span class="payment-status ' + sale.payment_status + '">' + escapeHtml(sale.payment_status) + '</span></td></tr>').join("") : '<tr><td colspan="6">No sales recorded yet.</td></tr>';
+}
+
+salesOpenBtn.addEventListener("click", async () => {
+  if (isGuest) { authOverlay.style.display = "flex"; return; }
+  dataModalOverlay.classList.remove("visible");
+  inventoryModalOverlay.classList.remove("visible");
+  salesModalOverlay.classList.add("visible");
+  await loadSalesWorkspace();
+});
+salesCloseBtn.addEventListener("click", () => salesModalOverlay.classList.remove("visible"));
+salesModalOverlay.addEventListener("click", event => { if (event.target === salesModalOverlay) salesModalOverlay.classList.remove("visible"); });
+customerAddBtn.addEventListener("click", async () => {
+  const payload = { name:customerName.value.trim(), email:customerEmail.value.trim(), phone:customerPhone.value.trim(), segment:customerSegment.value.trim(), notes:"" };
+  if (!payload.name) { alert("Enter a customer name."); return; }
+  customerAddBtn.disabled = true;
+  const res = await fetch("/sales/customers", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  customerAddBtn.disabled = false;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.detail || "Could not add customer."); return; }
+  customerName.value = ""; customerEmail.value = ""; customerPhone.value = ""; customerSegment.value = "";
+  await loadSalesWorkspace();
+});
+saleProduct.addEventListener("change", () => {
+  const selected = saleProduct.options[saleProduct.selectedIndex];
+  saleUnitPrice.value = selected && selected.dataset.price ? selected.dataset.price : "";
+});
+salePaymentStatus.addEventListener("change", () => {
+  saleDueDate.disabled = salePaymentStatus.value === "paid";
+  if (saleDueDate.disabled) saleDueDate.value = "";
+});
+saleDueDate.disabled = true;
+saleAddBtn.addEventListener("click", async () => {
+  const payload = {
+    product_id:Number(saleProduct.value), customer_id:saleCustomer.value ? Number(saleCustomer.value) : null,
+    quantity:Number(saleQuantity.value), unit_price:saleUnitPrice.value === "" ? null : Number(saleUnitPrice.value),
+    payment_status:salePaymentStatus.value, due_date:saleDueDate.value || null, reference_note:saleReference.value.trim()
+  };
+  if (!payload.product_id || !Number.isFinite(payload.quantity) || payload.quantity <= 0) { alert("Choose a product and enter a valid quantity."); return; }
+  saleAddBtn.disabled = true;
+  const res = await fetch("/sales/orders", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  saleAddBtn.disabled = false;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.detail || "Could not record this sale."); return; }
+  saleQuantity.value = ""; saleReference.value = ""; saleDueDate.value = "";
+  await loadSalesWorkspace();
 });
 
 function buildResearchBrief() {
@@ -1286,6 +1417,7 @@ function enterGuestMode() {
   guestNote.style.display = "block";
   companyProfileBtn.style.display = "none";
   inventoryOpenBtn.style.display = "none";
+  salesOpenBtn.style.display = "none";
   dataCheckOpenBtn.style.display = "none";
   companyUseRow.style.display = "none";
 }
@@ -1301,6 +1433,7 @@ async function afterLogin(email) {
   userEmailEl.textContent = email;
   companyProfileBtn.style.display = "block";
   inventoryOpenBtn.style.display = "block";
+  salesOpenBtn.style.display = "block";
   dataCheckOpenBtn.style.display = "block";
   const profileRes = await fetch("/company/profile");
   companyUseRow.style.display = profileRes.ok && await profileRes.json() ? "flex" : "none";

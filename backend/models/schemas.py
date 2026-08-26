@@ -182,3 +182,46 @@ class InventoryQuestionRequest(BaseModel):
 
 class InventoryQuestionResponse(BaseModel):
     answer: str
+
+
+class CustomerRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=160)
+    email: str = Field(default="", max_length=255)
+    phone: str = Field(default="", max_length=60)
+    segment: str = Field(default="", max_length=100)
+    notes: str = Field(default="", max_length=500)
+
+
+class CustomerItem(CustomerRequest):
+    id: int
+
+
+class SaleRequest(BaseModel):
+    product_id: int
+    customer_id: Optional[int] = None
+    quantity: float = Field(..., gt=0)
+    unit_price: Optional[float] = Field(default=None, ge=0)
+    payment_status: str = Field(default="paid", pattern="^(paid|due)$")
+    due_date: Optional[str] = Field(default=None, max_length=10)
+    reference_note: str = Field(default="", max_length=300)
+
+
+class SaleRecord(BaseModel):
+    id: int
+    customer_name: Optional[str] = None
+    product_name: str
+    quantity: float
+    unit_price: float
+    total_amount: float
+    payment_status: str
+    due_date: Optional[str] = None
+    created_at: str
+
+
+class SalesDashboardResponse(BaseModel):
+    revenue_30d: float
+    cash_collected_30d: float
+    outstanding_amount: float
+    orders_30d: int
+    top_customer: Optional[str] = None
+    recent_sales: List[SaleRecord]
