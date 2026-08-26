@@ -1,1079 +1,19 @@
-from google import genai
-from google.genai import types
-
-from backend.config import GEMINI_API_KEY
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-QUICK_PROMPT = (
-    "You are a Market Research Agent doing a QUICK SCAN. Given a business "
-    "idea, write ONE short paragraph (3-4 sentences) covering the most "
-    "important market demand signal and one key trend. Use your general "
-    "knowledge, be direct and fast. No sources needed."
-)
-
-STANDARD_PROMPT = (
-    "You are a Market Research Agent. Given a business idea or question, "
-    "research current market demand, relevant trends, market size, and "
-    "target customer profile using web search. Be concise and factual. "
-    "Write 3-5 short paragraphs. Do not discuss competitors or finances — "
-    "other agents handle those. Focus only on market demand, size, and trends. "
-    "At the very end, output one machine-readable line using exactly this format: "
-    "MARKET_CHART_DATA: {\"years\":[2026,2027,2028,2029,2030],\"values\":[10,12,14,17,20],\"unit\":\"USD millions\"}. "
-    "Replace the example numbers and unit with your evidence-based market projection. Output valid JSON on one line."
-)
-
-DEEP_PROMPT = STANDARD_PROMPT + (
-    " This is a DEEP RESEARCH request — be more thorough than usual. "
-    "Cover market size (TAM/SAM/SOM if data allows), specific growth "
-    "rates with numbers where you can find them, detailed customer "
-    "segments, and 2-3 notable industry trends with brief explanations. "
-    "Aim for 5-7 well-developed paragraphs."
-)
-
-
-def _extract_sources(response) -> list[str]:
-    sources = []
-    try:
-        candidate = response.candidates[0]
-        grounding = getattr(candidate, "grounding_metadata", None)
-        if grounding and grounding.grounding_chunks:
-            for chunk in grounding.grounding_chunks:
-                if chunk.web:
-                    title = chunk.web.title or chunk.web.uri
-                    uri = chunk.web.uri
-                    if uri:
-                        sources.append(f"- [{title}]({uri})")
-    except Exception:
-        pass
-    seen = set()
-    unique = []
-    for s in sources:
-        if s not in seen:
-            seen.add(s)
-            unique.append(s)
-    return unique[:8]
-
-
-def run(question: str, depth: str = "standard") -> str:
-    if depth == "quick":
-        response = client.models.generate_content(
-            model="gemini-3.5-flash-lite",
-            contents=question,
-            config=types.GenerateContentConfig(system_instruction=QUICK_PROMPT),
-        )
-        return response.text
-
-    system_prompt = DEEP_PROMPT if depth == "deep" else STANDARD_PROMPT
-
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=question,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-        ),
-    )
-    text = response.text
-    sources = _extract_sources(response)
-    if sources:
-        text += "\n\n**Sources:**\n" + "\n".join(sources)
-    return text
 import logging
 import json
 import io
 import threading
 import re
-from datetime import datetime
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
-import markdown as markdown_lib
-from xhtml2pdf import pisa
-from docx import Document
-from docx.shared import Inches, Pt, RGBColor
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-
-from backend.models.schemas import (
-    ResearchRequest, StartResponse, StatusResponse,
-    HistoryItem, JobDetailResponse, MessageItem,
-    FollowUpRequest, FollowUpResponse,
-    RenameRequest, FavoriteRequest,
-)
-from backend.agents.coordinator import run_research
-from backend.agents import followup
-from backend import jobs
-from backend.db import get_connection
-
-router = APIRouter()
-logger = logging.getLogger("research_api")
-
-
-def get_user_id(request: Request):
-    return request.session.get("user_id")
-
-
-def require_login(request: Request) -> int:
-    user_id = get_user_id(request)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="You must be logged in.")
-    return user_id
-
-
-@router.post("/research/start", response_model=StartResponse)
-def start_research(request: Request, body: ResearchRequest) -> StartResponse:
-    user_id = get_user_id(request)
-    job_id = jobs.create_job(body.question)
-
-    if user_id is not None:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO research_jobs (id, user_id, question, report, sections) VALUES (?, ?, ?, ?, ?)",
-            (job_id, user_id, body.question, None, "{}"),
-        )
-        conn.commit()
-        conn.close()
-
-    def _background_run():
-        try:
-            run_research(body.question, job_id, mode=body.mode, depth=body.depth)
-            if user_id is not None:
-                job = jobs.get_job(job_id)
-                conn2 = get_connection()
-                cursor2 = conn2.cursor()
-                cursor2.execute(
-                    "UPDATE research_jobs SET report = ?, sections = ? WHERE id = ?",
-                    (job["report"], json.dumps(job["sections"]), job_id),
-                )
-                conn2.commit()
-                conn2.close()
-        except Exception as e:
-            logger.exception("Research pipeline crashed")
-            jobs.fail_job(job_id, str(e))
-
-    thread = threading.Thread(target=_background_run, daemon=True)
-    thread.start()
-
-    return StartResponse(job_id=job_id)
-
-
-@router.get("/research/status/{job_id}", response_model=StatusResponse)
-def get_status(job_id: str) -> StatusResponse:
-    job = jobs.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    return StatusResponse(
-        status=job["status"],
-        stage=job["stage"],
-        sections=job["sections"],
-        report=job["report"],
-        error=job["error"],
-    )
-
-
-@router.get("/research/history", response_model=list[HistoryItem])
-def get_history(request: Request, q: str = "", favorites_only: bool = False):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    query = "SELECT id, question, title, favorite, created_at FROM research_jobs WHERE user_id = ?"
-    params = [user_id]
-
-    if q:
-        query += " AND (question LIKE ? OR title LIKE ?)"
-        like = f"%{q}%"
-        params.extend([like, like])
-
-    if favorites_only:
-        query += " AND favorite = 1"
-
-    query += " ORDER BY favorite DESC, created_at DESC"
-
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
-
-    return [
-        HistoryItem(
-            id=r["id"],
-            question=r["question"],
-            title=r["title"],
-            favorite=bool(r["favorite"]),
-            created_at=r["created_at"],
-        )
-        for r in rows
-    ]
-
-
-@router.get("/research/job/{job_id}", response_model=JobDetailResponse)
-def get_job_detail(job_id: str, request: Request):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-    row = cursor.fetchone()
-    if row is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    cursor.execute(
-        "SELECT role, content FROM follow_up_messages WHERE job_id = ? ORDER BY created_at ASC",
-        (job_id,),
-    )
-    messages = [MessageItem(role=m["role"], content=m["content"]) for m in cursor.fetchall()]
-    conn.close()
-
-    sections = json.loads(row["sections"]) if row["sections"] else {}
-
-    return JobDetailResponse(
-        id=row["id"],
-        question=row["question"],
-        title=row["title"],
-        favorite=bool(row["favorite"]),
-        report=row["report"],
-        sections=sections,
-        messages=messages,
-    )
-
-
-@router.put("/research/job/{job_id}/rename")
-def rename_job(job_id: str, body: RenameRequest, request: Request):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-    if cursor.fetchone() is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-    cursor.execute("UPDATE research_jobs SET title = ? WHERE id = ?", (body.title, job_id))
-    conn.commit()
-    conn.close()
-    return {"status": "renamed"}
-
-
-@router.put("/research/job/{job_id}/favorite")
-def favorite_job(job_id: str, body: FavoriteRequest, request: Request):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-    if cursor.fetchone() is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-    cursor.execute("UPDATE research_jobs SET favorite = ? WHERE id = ?", (1 if body.favorite else 0, job_id))
-    conn.commit()
-    conn.close()
-    return {"status": "updated"}
-
-
-@router.delete("/research/job/{job_id}")
-def delete_job(job_id: str, request: Request):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-    if cursor.fetchone() is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-    cursor.execute("DELETE FROM follow_up_messages WHERE job_id = ?", (job_id,))
-    cursor.execute("DELETE FROM research_jobs WHERE id = ?", (job_id,))
-    conn.commit()
-    conn.close()
-    return {"status": "deleted"}
-
-
-from backend.agents import opportunity_finder
-from backend.models.schemas import OpportunityRequest, OpportunityResponse, OpportunityItem
-
-
-@router.post("/research/opportunities", response_model=OpportunityResponse)
-def find_opportunities(body: OpportunityRequest):
-    items = opportunity_finder.run(body.query)
-    return OpportunityResponse(items=[OpportunityItem(**item) for item in items])
-
-
-def _get_report_and_question(job_id: str, user_id):
-    if user_id is not None:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-        row = cursor.fetchone()
-        conn.close()
-        if row is None:
-            return None, None
-        return row["question"], row["report"]
-    else:
-        job = jobs.get_job(job_id)
-        if job is None:
-            return None, None
-        return job["question"], job["report"]
-
-
-def _get_research_data(job_id: str, user_id):
-    if user_id is not None:
-        conn = get_connection()
-        row = conn.execute(
-            "SELECT question, report, sections FROM research_jobs WHERE id = ? AND user_id = ?",
-            (job_id, user_id),
-        ).fetchone()
-        conn.close()
-        if row is None:
-            return None, None, {}
-        return row["question"], row["report"], json.loads(row["sections"] or "{}")
-    job = jobs.get_job(job_id)
-    if job is None:
-        return None, None, {}
-    return job["question"], job["report"], job.get("sections", {})
-
-
-def _clean_export_text(text: str) -> str:
-    text = re.sub(r"^\s*(MARKET|COMPETITOR|FINANCIAL)_CHART_DATA:\s*\{.*\}\s*$", "", text or "", flags=re.MULTILINE)
-    text = re.sub(r"\[([^]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
-    return text.strip()
-
-
-def _safe_report_name(question: str) -> str:
-    return "".join(c if c.isalnum() or c in " -_" else "" for c in question)[:50].strip() or "report"
-
-
-@router.get("/research/job/{job_id}/pdf")
-def export_pdf(job_id: str, request: Request):
-    user_id = get_user_id(request)
-    question, report = _get_report_and_question(job_id, user_id)
-
-    if question is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not report:
-        raise HTTPException(status_code=400, detail="This report isn't ready yet.")
-
-    body_html = markdown_lib.markdown(report, extensions=["tables"])
-    prepared_date = datetime.now().strftime("%d %B %Y")
-
-    html_content = f"""
-    <html>
-    <head>
-    <style>
-        body {{ font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #1a1a1a; }}
-        h1 {{ color: #5b7cfa; font-size: 20px; margin-bottom: 2px; }}
-        h2 {{ color: #5b7cfa; font-size: 15px; margin-top: 18px; margin-bottom: 6px; }}
-        h3 {{ color: #5b7cfa; font-size: 13px; margin-top: 14px; }}
-        p {{ line-height: 1.5; margin: 6px 0; }}
-        table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
-        th, td {{ border: 1px solid #cccccc; padding: 6px 8px; text-align: left; font-size: 10px; }}
-        th {{ background: #f0f0f0; font-weight: bold; }}
-        hr {{ border: none; border-top: 1px solid #cccccc; margin: 16px 0; }}
-        .meta {{ color: #666666; font-size: 10px; margin-bottom: 20px; }}
-        a {{ color: #5b7cfa; }}
-    </style>
-    </head>
-    <body>
-        <h1>VentureCore AI</h1>
-        <div class="meta">
-            Business Intelligence Report<br/>
-            {question}<br/>
-            Prepared: {prepared_date}
-        </div>
-        {body_html}
-    </body>
-    </html>
-    """
-
-    buffer = io.BytesIO()
-    pisa.CreatePDF(html_content, dest=buffer)
-    pdf_bytes = buffer.getvalue()
-    buffer.close()
-
-    safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in question)[:50].strip() or "report"
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}.pdf"'},
-    )
-
-
-@router.get("/research/job/{job_id}/docx")
-def export_docx(job_id: str, request: Request):
-    question, report, _ = _get_research_data(job_id, get_user_id(request))
-    if question is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not report:
-        raise HTTPException(status_code=400, detail="This report isn't ready yet.")
-
-    document = Document()
-    section = document.sections[0]
-    section.top_margin = Inches(0.7)
-    section.bottom_margin = Inches(0.7)
-    title = document.add_heading("VENTURECORE AI", 0)
-    title.runs[0].font.color.rgb = RGBColor(91, 124, 250)
-    document.add_paragraph("Business Intelligence Report", style="Subtitle")
-    document.add_paragraph(question)
-    document.add_paragraph(f"Prepared: {datetime.now().strftime('%d %B %Y')}")
-    document.add_page_break()
-
-    for raw_line in _clean_export_text(report).splitlines():
-        line = raw_line.strip()
-        if not line or line == "---":
-            continue
-        if line.startswith("**") and line.endswith("**"):
-            document.add_heading(line.strip("*").rstrip(":"), level=1)
-        elif line.startswith("### "):
-            document.add_heading(line[4:], level=2)
-        elif line.startswith("## "):
-            document.add_heading(line[3:], level=1)
-        elif line.startswith(("- ", "* ")):
-            document.add_paragraph(line[2:], style="List Bullet")
-        elif line.startswith("|"):
-            paragraph = document.add_paragraph(line.strip("|").replace("|", "  |  "))
-            paragraph.style = document.styles["No Spacing"]
-        else:
-            document.add_paragraph(line.replace("**", ""))
-
-    styles = document.styles
-    styles["Normal"].font.name = "Arial"
-    styles["Normal"].font.size = Pt(10.5)
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return Response(
-        content=buffer.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_report_name(question)}.docx"'},
-    )
-
-
-@router.get("/research/job/{job_id}/xlsx")
-def export_xlsx(job_id: str, request: Request):
-    question, report, sections = _get_research_data(job_id, get_user_id(request))
-    if question is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not report:
-        raise HTTPException(status_code=400, detail="This report isn't ready yet.")
-
-    workbook = Workbook()
-    workbook.remove(workbook.active)
-    sheet_data = [
-        ("Executive Report", report),
-        ("Market Research", sections.get("market_research", "")),
-        ("Competitors", sections.get("competitor_analysis", "")),
-        ("Financial Analysis", sections.get("financial_analysis", "")),
-    ]
-    header_fill = PatternFill("solid", fgColor="5B7CFA")
-    for sheet_name, content in sheet_data:
-        sheet = workbook.create_sheet(sheet_name)
-        sheet.append(["VENTURECORE AI", sheet_name])
-        sheet.append(["Business", question])
-        sheet.append(["Prepared", datetime.now().strftime("%d %B %Y")])
-        sheet.append([])
-        sheet.append(["Report content"])
-        for line in _clean_export_text(content).splitlines():
-            if line.strip():
-                sheet.append([line.replace("**", "")])
-        for cell in sheet[1]:
-            cell.fill = header_fill
-            cell.font = Font(color="FFFFFF", bold=True)
-        sheet.column_dimensions["A"].width = 110
-        sheet.column_dimensions["B"].width = 70
-        for row in sheet.iter_rows():
-            for cell in row:
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-
-    sources_sheet = workbook.create_sheet("Sources")
-    sources_sheet.append(["Source", "URL", "Quality"])
-    source_number = 1
-    combined = "\n".join([report] + list(sections.values()))
-    seen_urls = set()
-    for label, url in re.findall(r"\[([^]]+)\]\((https?://[^)]+)\)", combined):
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        domain = url.lower()
-        quality = "Official / Government" if any(token in domain for token in [".gov", ".edu", "worldbank.org", "who.int", "oecd.org"]) else "Industry / Company source"
-        sources_sheet.append([f"[{source_number}] {label}", url, quality])
-        source_number += 1
-    for cell in sources_sheet[1]:
-        cell.fill = header_fill
-        cell.font = Font(color="FFFFFF", bold=True)
-    sources_sheet.column_dimensions["A"].width = 50
-    sources_sheet.column_dimensions["B"].width = 75
-    sources_sheet.column_dimensions["C"].width = 25
-    sources_sheet.freeze_panes = "A2"
-
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-    return Response(
-        content=buffer.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_report_name(question)}.xlsx"'},
-    )
-
-
-@router.post("/research/job/{job_id}/message", response_model=FollowUpResponse)
-def send_follow_up(job_id: str, body: FollowUpRequest, request: Request):
-    user_id = get_user_id(request)
-
-    if user_id is not None:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-        row = cursor.fetchone()
-        if row is None:
-            conn.close()
-            raise HTTPException(status_code=404, detail="Job not found")
-
-        cursor.execute(
-            "SELECT role, content FROM follow_up_messages WHERE job_id = ? ORDER BY created_at ASC",
-            (job_id,),
-        )
-        history = [{"role": m["role"], "content": m["content"]} for m in cursor.fetchall()]
-        question = row["question"]
-        report = row["report"] or ""
-    else:
-        job = jobs.get_job(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="Job not found")
-        history = job["messages"]
-        question = job["question"]
-        report = job["report"] or ""
-
-    try:
-        reply = followup.run(
-            question=question,
-            report=report,
-            history=history,
-            new_message=body.message,
-        )
-    except Exception as e:
-        if user_id is not None:
-            conn.close()
-        logger.exception("Follow-up failed")
-        raise HTTPException(status_code=502, detail="Follow-up failed. Please try again.") from e
-
-    if user_id is not None:
-        cursor.execute(
-            "INSERT INTO follow_up_messages (job_id, role, content) VALUES (?, ?, ?)",
-            (job_id, "user", body.message),
-        )
-        cursor.execute(
-            "INSERT INTO follow_up_messages (job_id, role, content) VALUES (?, ?, ?)",
-            (job_id, "assistant", reply),
-        )
-        conn.commit()
-        conn.close()
-    else:
-        jobs.add_message(job_id, "user", body.message)
-        jobs.add_message(job_id, "assistant", reply)
-
-    return FollowUpResponse(reply=reply)
-import logging
-import json
-import io
-import threading
-import re
-from datetime import datetime
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
-import markdown as markdown_lib
-from xhtml2pdf import pisa
-from docx import Document
-from docx.shared import Inches, Pt, RGBColor
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-
-from backend.models.schemas import (
-    ResearchRequest, StartResponse, StatusResponse,
-    HistoryItem, JobDetailResponse, MessageItem,
-    FollowUpRequest, FollowUpResponse,
-    RenameRequest, FavoriteRequest,
-)
-from backend.agents.coordinator import run_research
-from backend.agents import followup
-from backend import jobs
-from backend.db import get_connection
-
-router = APIRouter()
-logger = logging.getLogger("research_api")
-
-
-def get_user_id(request: Request):
-    return request.session.get("user_id")
-
-
-def require_login(request: Request) -> int:
-    user_id = get_user_id(request)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="You must be logged in.")
-    return user_id
-
-
-@router.post("/research/start", response_model=StartResponse)
-def start_research(request: Request, body: ResearchRequest) -> StartResponse:
-    user_id = get_user_id(request)
-    job_id = jobs.create_job(body.question)
-
-    if user_id is not None:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO research_jobs (id, user_id, question, report, sections) VALUES (?, ?, ?, ?, ?)",
-            (job_id, user_id, body.question, None, "{}"),
-        )
-        conn.commit()
-        conn.close()
-
-    def _background_run():
-        try:
-            run_research(body.question, job_id, mode=body.mode, depth=body.depth)
-            if user_id is not None:
-                job = jobs.get_job(job_id)
-                conn2 = get_connection()
-                cursor2 = conn2.cursor()
-                cursor2.execute(
-                    "UPDATE research_jobs SET report = ?, sections = ? WHERE id = ?",
-                    (job["report"], json.dumps(job["sections"]), job_id),
-                )
-                conn2.commit()
-                conn2.close()
-        except Exception as e:
-            logger.exception("Research pipeline crashed")
-            jobs.fail_job(job_id, str(e))
-
-    thread = threading.Thread(target=_background_run, daemon=True)
-    thread.start()
-
-    return StartResponse(job_id=job_id)
-
-
-@router.get("/research/status/{job_id}", response_model=StatusResponse)
-def get_status(job_id: str) -> StatusResponse:
-    job = jobs.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    return StatusResponse(
-        status=job["status"],
-        stage=job["stage"],
-        sections=job["sections"],
-        report=job["report"],
-        error=job["error"],
-    )
-
-
-@router.get("/research/history", response_model=list[HistoryItem])
-def get_history(request: Request, q: str = "", favorites_only: bool = False):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    query = "SELECT id, question, title, favorite, created_at FROM research_jobs WHERE user_id = ?"
-    params = [user_id]
-
-    if q:
-        query += " AND (question LIKE ? OR title LIKE ?)"
-        like = f"%{q}%"
-        params.extend([like, like])
-
-    if favorites_only:
-        query += " AND favorite = 1"
-
-    query += " ORDER BY favorite DESC, created_at DESC"
-
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
-
-    return [
-        HistoryItem(
-            id=r["id"],
-            question=r["question"],
-            title=r["title"],
-            favorite=bool(r["favorite"]),
-            created_at=r["created_at"],
-        )
-        for r in rows
-    ]
-
-
-@router.get("/research/job/{job_id}", response_model=JobDetailResponse)
-def get_job_detail(job_id: str, request: Request):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-    row = cursor.fetchone()
-    if row is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    cursor.execute(
-        "SELECT role, content FROM follow_up_messages WHERE job_id = ? ORDER BY created_at ASC",
-        (job_id,),
-    )
-    messages = [MessageItem(role=m["role"], content=m["content"]) for m in cursor.fetchall()]
-    conn.close()
-
-    sections = json.loads(row["sections"]) if row["sections"] else {}
-
-    return JobDetailResponse(
-        id=row["id"],
-        question=row["question"],
-        title=row["title"],
-        favorite=bool(row["favorite"]),
-        report=row["report"],
-        sections=sections,
-        messages=messages,
-    )
-
-
-@router.put("/research/job/{job_id}/rename")
-def rename_job(job_id: str, body: RenameRequest, request: Request):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-    if cursor.fetchone() is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-    cursor.execute("UPDATE research_jobs SET title = ? WHERE id = ?", (body.title, job_id))
-    conn.commit()
-    conn.close()
-    return {"status": "renamed"}
-
-
-@router.put("/research/job/{job_id}/favorite")
-def favorite_job(job_id: str, body: FavoriteRequest, request: Request):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-    if cursor.fetchone() is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-    cursor.execute("UPDATE research_jobs SET favorite = ? WHERE id = ?", (1 if body.favorite else 0, job_id))
-    conn.commit()
-    conn.close()
-    return {"status": "updated"}
-
-
-@router.delete("/research/job/{job_id}")
-def delete_job(job_id: str, request: Request):
-    user_id = require_login(request)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-    if cursor.fetchone() is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Job not found")
-    cursor.execute("DELETE FROM follow_up_messages WHERE job_id = ?", (job_id,))
-    cursor.execute("DELETE FROM research_jobs WHERE id = ?", (job_id,))
-    conn.commit()
-    conn.close()
-    return {"status": "deleted"}
-
-
-from backend.agents import opportunity_finder
-from backend.models.schemas import OpportunityRequest, OpportunityResponse, OpportunityItem
-
-
-@router.post("/research/opportunities", response_model=OpportunityResponse)
-def find_opportunities(body: OpportunityRequest):
-    items = opportunity_finder.run(body.query)
-    return OpportunityResponse(items=[OpportunityItem(**item) for item in items])
-
-
-def _get_report_and_question(job_id: str, user_id):
-    if user_id is not None:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-        row = cursor.fetchone()
-        conn.close()
-        if row is None:
-            return None, None
-        return row["question"], row["report"]
-    else:
-        job = jobs.get_job(job_id)
-        if job is None:
-            return None, None
-        return job["question"], job["report"]
-
-
-def _get_research_data(job_id: str, user_id):
-    if user_id is not None:
-        conn = get_connection()
-        row = conn.execute(
-            "SELECT question, report, sections FROM research_jobs WHERE id = ? AND user_id = ?",
-            (job_id, user_id),
-        ).fetchone()
-        conn.close()
-        if row is None:
-            return None, None, {}
-        return row["question"], row["report"], json.loads(row["sections"] or "{}")
-    job = jobs.get_job(job_id)
-    if job is None:
-        return None, None, {}
-    return job["question"], job["report"], job.get("sections", {})
-
-
-def _clean_export_text(text: str) -> str:
-    text = re.sub(
-        r"^\s*(MARKET|COMPETITOR|FINANCIAL)_CHART_DATA:[^\n]*(?:\n(?!\s*(?:\*\*Sources|Sources:|---|\*\*[A-Za-z]))[^\n]*)*",
-        "",
-        text or "",
-        flags=re.MULTILINE | re.IGNORECASE,
-    )
-    text = re.sub(r"\[([^]]+)\]\(([^)]+)\)", r"\1 (\2)", text)
-    return text.strip()
-
-
-def _safe_report_name(question: str) -> str:
-    return "".join(c if c.isalnum() or c in " -_" else "" for c in question)[:50].strip() or "report"
-
-
-@router.get("/research/job/{job_id}/pdf")
-def export_pdf(job_id: str, request: Request):
-    user_id = get_user_id(request)
-    question, report = _get_report_and_question(job_id, user_id)
-
-    if question is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not report:
-        raise HTTPException(status_code=400, detail="This report isn't ready yet.")
-
-    body_html = markdown_lib.markdown(report, extensions=["tables"])
-    prepared_date = datetime.now().strftime("%d %B %Y")
-
-    html_content = f"""
-    <html>
-    <head>
-    <style>
-        body {{ font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #1a1a1a; }}
-        h1 {{ color: #5b7cfa; font-size: 20px; margin-bottom: 2px; }}
-        h2 {{ color: #5b7cfa; font-size: 15px; margin-top: 18px; margin-bottom: 6px; }}
-        h3 {{ color: #5b7cfa; font-size: 13px; margin-top: 14px; }}
-        p {{ line-height: 1.5; margin: 6px 0; }}
-        table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
-        th, td {{ border: 1px solid #cccccc; padding: 6px 8px; text-align: left; font-size: 10px; }}
-        th {{ background: #f0f0f0; font-weight: bold; }}
-        hr {{ border: none; border-top: 1px solid #cccccc; margin: 16px 0; }}
-        .meta {{ color: #666666; font-size: 10px; margin-bottom: 20px; }}
-        a {{ color: #5b7cfa; }}
-    </style>
-    </head>
-    <body>
-        <h1>VentureCore AI</h1>
-        <div class="meta">
-            Business Intelligence Report<br/>
-            {question}<br/>
-            Prepared: {prepared_date}
-        </div>
-        {body_html}
-    </body>
-    </html>
-    """
-
-    buffer = io.BytesIO()
-    pisa.CreatePDF(html_content, dest=buffer)
-    pdf_bytes = buffer.getvalue()
-    buffer.close()
-
-    safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in question)[:50].strip() or "report"
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}.pdf"'},
-    )
-
-
-@router.get("/research/job/{job_id}/docx")
-def export_docx(job_id: str, request: Request):
-    question, report, _ = _get_research_data(job_id, get_user_id(request))
-    if question is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not report:
-        raise HTTPException(status_code=400, detail="This report isn't ready yet.")
-
-    document = Document()
-    section = document.sections[0]
-    section.top_margin = Inches(0.7)
-    section.bottom_margin = Inches(0.7)
-    title = document.add_heading("VENTURECORE AI", 0)
-    title.runs[0].font.color.rgb = RGBColor(91, 124, 250)
-    document.add_paragraph("Business Intelligence Report", style="Subtitle")
-    document.add_paragraph(question)
-    document.add_paragraph(f"Prepared: {datetime.now().strftime('%d %B %Y')}")
-    document.add_page_break()
-
-    for raw_line in _clean_export_text(report).splitlines():
-        line = raw_line.strip()
-        if not line or line == "---":
-            continue
-        if line.startswith("**") and line.endswith("**"):
-            document.add_heading(line.strip("*").rstrip(":"), level=1)
-        elif line.startswith("### "):
-            document.add_heading(line[4:], level=2)
-        elif line.startswith("## "):
-            document.add_heading(line[3:], level=1)
-        elif line.startswith(("- ", "* ")):
-            document.add_paragraph(line[2:], style="List Bullet")
-        elif line.startswith("|"):
-            paragraph = document.add_paragraph(line.strip("|").replace("|", "  |  "))
-            paragraph.style = document.styles["No Spacing"]
-        else:
-            document.add_paragraph(line.replace("**", ""))
-
-    styles = document.styles
-    styles["Normal"].font.name = "Arial"
-    styles["Normal"].font.size = Pt(10.5)
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return Response(
-        content=buffer.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_report_name(question)}.docx"'},
-    )
-
-
-@router.get("/research/job/{job_id}/xlsx")
-def export_xlsx(job_id: str, request: Request):
-    question, report, sections = _get_research_data(job_id, get_user_id(request))
-    if question is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if not report:
-        raise HTTPException(status_code=400, detail="This report isn't ready yet.")
-
-    workbook = Workbook()
-    workbook.remove(workbook.active)
-    sheet_data = [
-        ("Executive Report", report),
-        ("Market Research", sections.get("market_research", "")),
-        ("Competitors", sections.get("competitor_analysis", "")),
-        ("Financial Analysis", sections.get("financial_analysis", "")),
-    ]
-    header_fill = PatternFill("solid", fgColor="5B7CFA")
-    for sheet_name, content in sheet_data:
-        sheet = workbook.create_sheet(sheet_name)
-        sheet.append(["VENTURECORE AI", sheet_name])
-        sheet.append(["Business", question])
-        sheet.append(["Prepared", datetime.now().strftime("%d %B %Y")])
-        sheet.append([])
-        sheet.append(["Report content"])
-        for line in _clean_export_text(content).splitlines():
-            if line.strip():
-                sheet.append([line.replace("**", "")])
-        for cell in sheet[1]:
-            cell.fill = header_fill
-            cell.font = Font(color="FFFFFF", bold=True)
-        sheet.column_dimensions["A"].width = 110
-        sheet.column_dimensions["B"].width = 70
-        for row in sheet.iter_rows():
-            for cell in row:
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-
-    sources_sheet = workbook.create_sheet("Sources")
-    sources_sheet.append(["Source", "URL", "Quality"])
-    source_number = 1
-    combined = "\n".join([report] + list(sections.values()))
-    seen_urls = set()
-    for label, url in re.findall(r"\[([^]]+)\]\((https?://[^)]+)\)", combined):
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        domain = url.lower()
-        quality = "Official / Government" if any(token in domain for token in [".gov", ".edu", "worldbank.org", "who.int", "oecd.org"]) else "Industry / Company source"
-        sources_sheet.append([f"[{source_number}] {label}", url, quality])
-        source_number += 1
-    for cell in sources_sheet[1]:
-        cell.fill = header_fill
-        cell.font = Font(color="FFFFFF", bold=True)
-    sources_sheet.column_dimensions["A"].width = 50
-    sources_sheet.column_dimensions["B"].width = 75
-    sources_sheet.column_dimensions["C"].width = 25
-    sources_sheet.freeze_panes = "A2"
-
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-    return Response(
-        content=buffer.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_report_name(question)}.xlsx"'},
-    )
-
-
-@router.post("/research/job/{job_id}/message", response_model=FollowUpResponse)
-def send_follow_up(job_id: str, body: FollowUpRequest, request: Request):
-    user_id = get_user_id(request)
-
-    if user_id is not None:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
-        row = cursor.fetchone()
-        if row is None:
-            conn.close()
-            raise HTTPException(status_code=404, detail="Job not found")
-
-        cursor.execute(
-            "SELECT role, content FROM follow_up_messages WHERE job_id = ? ORDER BY created_at ASC",
-            (job_id,),
-        )
-        history = [{"role": m["role"], "content": m["content"]} for m in cursor.fetchall()]
-        question = row["question"]
-        report = row["report"] or ""
-    else:
-        job = jobs.get_job(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="Job not found")
-        history = job["messages"]
-        question = job["question"]
-        report = job["report"] or ""
-
-    try:
-        reply = followup.run(
-            question=question,
-            report=report,
-            history=history,
-            new_message=body.message,
-        )
-    except Exception as e:
-        if user_id is not None:
-            conn.close()
-        logger.exception("Follow-up failed")
-        raise HTTPException(status_code=502, detail="Follow-up failed. Please try again.") from e
-
-    if user_id is not None:
-        cursor.execute(
-            "INSERT INTO follow_up_messages (job_id, role, content) VALUES (?, ?, ?)",
-            (job_id, "user", body.message),
-        )
-        cursor.execute(
-            "INSERT INTO follow_up_messages (job_id, role, content) VALUES (?, ?, ?)",
-            (job_id, "assistant", reply),
-        )
-        conn.commit()
-        conn.close()
-    else:
-        jobs.add_message(job_id, "user", body.message)
-        jobs.add_message(job_id, "assistant", reply)
-
-    return FollowUpResponse(reply=reply)
-import logging
-import json
-import io
-import threading
-import re
+import csv
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import Response
 import markdown as markdown_lib
 from xhtml2pdf import pisa
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from openpyxl import Workbook
+from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
 from backend.models.schemas import (
@@ -1082,6 +22,8 @@ from backend.models.schemas import (
     FollowUpRequest, FollowUpResponse,
     RenameRequest, FavoriteRequest,
     CompanyProfileRequest, CompanyProfileResponse,
+    DataQualityResponse,
+    SupplierRequest, ProductRequest, StockMovementRequest, InventoryItem,
 )
 from backend.agents.coordinator import run_research
 from backend.agents import followup
@@ -1152,6 +94,154 @@ def save_company_profile(body: CompanyProfileRequest, request: Request):
     row = conn.execute("SELECT * FROM company_profiles WHERE user_id = ?", (user_id,)).fetchone()
     conn.close()
     return dict(row)
+
+
+def _is_blank(value) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _looks_numeric_column(name: str) -> bool:
+    return any(word in name.lower() for word in ("sales", "revenue", "cost", "price", "stock", "quantity", "qty", "expense", "amount", "margin"))
+
+
+@router.post("/company/data/quality", response_model=DataQualityResponse)
+async def check_data_quality(request: Request, file: UploadFile = File(...), data_type: str = Form("Business data")):
+    user_id = require_login(request)
+    filename = file.filename or "upload"
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if extension not in {"csv", "xlsx"}:
+        raise HTTPException(status_code=400, detail="Upload a CSV or XLSX file.")
+    raw = await file.read()
+    if not raw or len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File must be between 1 byte and 10 MB.")
+    try:
+        if extension == "csv":
+            decoded = raw.decode("utf-8-sig")
+            rows = list(csv.reader(decoded.splitlines()))
+        else:
+            workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+            sheet = workbook.active
+            rows = [list(row) for row in sheet.iter_rows(values_only=True)]
+            workbook.close()
+    except Exception:
+        raise HTTPException(status_code=400, detail="This file could not be read. Check that it is a valid CSV or XLSX file.")
+    if len(rows) < 2:
+        raise HTTPException(status_code=400, detail="Your file needs a header row and at least one data row.")
+    columns = [str(cell).strip() if cell is not None else f"Column {index + 1}" for index, cell in enumerate(rows[0])]
+    data_rows = rows[1:]
+    missing_values = sum(1 for row in data_rows for cell in row if _is_blank(cell))
+    normalized_rows = [tuple("" if _is_blank(cell) else str(cell).strip() for cell in row) for row in data_rows]
+    duplicate_rows = len(normalized_rows) - len(set(normalized_rows))
+    invalid_numeric_values = 0
+    for row in data_rows:
+        for index, cell in enumerate(row[:len(columns)]):
+            if _looks_numeric_column(columns[index]) and not _is_blank(cell):
+                try:
+                    float(str(cell).replace(",", "").replace("RM", "").replace("BDT", "").replace("$", "").strip())
+                except ValueError:
+                    invalid_numeric_values += 1
+    warnings = []
+    if missing_values: warnings.append(f"{missing_values} missing value(s) found.")
+    if duplicate_rows: warnings.append(f"{duplicate_rows} duplicate row(s) found.")
+    if invalid_numeric_values: warnings.append(f"{invalid_numeric_values} value(s) in numeric-looking columns could not be read as numbers.")
+    if not warnings: warnings.append("No common data-quality issues were found in this file.")
+    result = DataQualityResponse(filename=filename, data_type=data_type, row_count=len(data_rows), column_count=len(columns), columns=columns, missing_values=missing_values, duplicate_rows=duplicate_rows, invalid_numeric_values=invalid_numeric_values, warnings=warnings)
+    conn = get_connection()
+    conn.execute("INSERT INTO data_uploads (user_id, filename, data_type, row_count, column_count, quality_summary) VALUES (?, ?, ?, ?, ?, ?)", (user_id, filename, data_type, result.row_count, result.column_count, json.dumps(result.model_dump())))
+    conn.commit()
+    conn.close()
+    return result
+
+
+@router.post("/inventory/suppliers")
+def create_supplier(body: SupplierRequest, request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    cursor = conn.execute(
+        "INSERT INTO suppliers (user_id, name, contact_name, email, phone, lead_time_days, payment_terms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, body.name, body.contact_name, body.email, body.phone, body.lead_time_days, body.payment_terms),
+    )
+    conn.commit()
+    supplier_id = cursor.lastrowid
+    conn.close()
+    return {"id": supplier_id, "status": "created"}
+
+
+@router.post("/inventory/products")
+def create_product(body: ProductRequest, request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    if body.supplier_id is not None:
+        supplier = conn.execute("SELECT id FROM suppliers WHERE id = ? AND user_id = ?", (body.supplier_id, user_id)).fetchone()
+        if supplier is None:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Supplier not found")
+    try:
+        cursor = conn.execute(
+            """INSERT INTO products (user_id, supplier_id, sku, name, category, unit_cost, selling_price, reorder_point, lead_time_days)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, body.supplier_id, body.sku, body.name, body.category, body.unit_cost, body.selling_price, body.reorder_point, body.lead_time_days),
+        )
+        conn.commit()
+        product_id = cursor.lastrowid
+    except Exception as exc:
+        conn.close()
+        if "UNIQUE" in str(exc):
+            raise HTTPException(status_code=400, detail="This SKU already exists in your company workspace.")
+        raise
+    conn.close()
+    return {"id": product_id, "status": "created"}
+
+
+@router.post("/inventory/products/{product_id}/movement")
+def record_stock_movement(product_id: int, body: StockMovementRequest, request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    product = conn.execute("SELECT id FROM products WHERE id = ? AND user_id = ?", (product_id, user_id)).fetchone()
+    if product is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Product not found")
+    direction = 1 if body.transaction_type in {"received", "adjustment"} else -1
+    quantity_change = body.quantity * direction
+    current_stock = conn.execute("SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_transactions WHERE product_id = ?", (product_id,)).fetchone()[0]
+    if current_stock + quantity_change < 0:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"Not enough stock. Current stock is {current_stock}.")
+    cursor = conn.execute(
+        "INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity_change, unit_cost, reference_note) VALUES (?, ?, ?, ?, ?, ?)",
+        (product_id, user_id, body.transaction_type, quantity_change, body.unit_cost, body.reference_note),
+    )
+    conn.commit()
+    conn.close()
+    return {"id": cursor.lastrowid, "current_stock": current_stock + quantity_change, "status": "recorded"}
+
+
+@router.get("/inventory/dashboard", response_model=list[InventoryItem])
+def inventory_dashboard(request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT p.*, s.name AS supplier_name, COALESCE(SUM(t.quantity_change), 0) AS current_stock
+           FROM products p
+           LEFT JOIN suppliers s ON s.id = p.supplier_id
+           LEFT JOIN inventory_transactions t ON t.product_id = p.id
+           WHERE p.user_id = ? AND p.active = 1
+           GROUP BY p.id
+           ORDER BY current_stock <= p.reorder_point DESC, p.name ASC""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        stock = float(row["current_stock"])
+        if stock <= 0:
+            status = "Out of stock"
+        elif stock <= row["reorder_point"]:
+            status = "Reorder now"
+        else:
+            status = "Healthy"
+        result.append(InventoryItem(id=row["id"], sku=row["sku"] or "", name=row["name"], category=row["category"] or "", current_stock=stock, unit_cost=row["unit_cost"], selling_price=row["selling_price"], inventory_value=round(stock * row["unit_cost"], 2), reorder_point=row["reorder_point"], lead_time_days=row["lead_time_days"], supplier_name=row["supplier_name"], status=status))
+    return result
 
 
 @router.post("/research/start", response_model=StartResponse)

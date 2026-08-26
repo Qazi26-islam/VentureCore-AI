@@ -58,6 +58,10 @@
   .new-research-btn:hover { border-color: var(--accent); }
   .company-btn { width: 100%; padding: 7px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 8px; }
   .company-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .data-btn { width: 100%; padding: 7px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 12px; }
+  .data-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .inventory-btn { width:100%; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:12px; font-weight:600; cursor:pointer; margin-bottom:8px; }
+  .inventory-btn:hover { border-color:var(--accent); color:var(--accent); }
   .company-use { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: -4px 0 14px; cursor: pointer; }
   #companyModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
   #companyModalOverlay.visible { display: flex; }
@@ -70,6 +74,21 @@
   .company-form-grid input, .company-form-grid textarea, .company-form-grid select { width:100%; border:1px solid var(--border); background:var(--panel2); color:var(--text); padding:10px; border-radius:8px; font:inherit; font-size:13px; }
   .company-form-grid textarea { min-height:68px; resize:vertical; }
   .company-modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .quality-result { display:none; margin-top:16px; padding:12px; border-radius:10px; background:var(--panel2); font-size:12.5px; line-height:1.55; }
+  .quality-result ul { padding-left:18px; margin:8px 0 0; }
+  .inventory-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:14px 0; }
+  .inventory-stat { padding:10px; background:var(--panel2); border-radius:9px; }
+  .inventory-stat span { display:block; color:var(--muted); font-size:10.5px; }
+  .inventory-stat strong { display:block; margin-top:3px; font-size:15px; }
+  .inventory-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .inventory-table th,.inventory-table td { text-align:left; border-bottom:1px solid var(--border); padding:9px 6px; vertical-align:middle; }
+  .inventory-table th { color:var(--muted); font-size:10.5px; text-transform:uppercase; }
+  .stock-status { font-size:10px; font-weight:700; border-radius:999px; padding:3px 7px; white-space:nowrap; }
+  .stock-status.healthy { color:var(--done); background:rgba(74,222,128,.12); }
+  .stock-status.reorder { color:var(--warn); background:rgba(251,191,36,.12); }
+  .stock-status.out { color:var(--error); background:rgba(248,113,113,.12); }
+  .stock-action { border:1px solid var(--border); background:var(--panel); color:var(--muted); border-radius:6px; font-size:11px; padding:4px 6px; cursor:pointer; }
+  .stock-action:hover { color:var(--accent); border-color:var(--accent); }
   .new-research-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .new-research-btn:disabled:hover { border-color: var(--border); }
   .history-search { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 12px; margin-bottom: 10px; flex-shrink: 0; }
@@ -271,6 +290,7 @@
     .setup-grid { grid-template-columns: 1fr; }
     .company-form-grid { grid-template-columns: 1fr; }
     .company-form-grid .full { grid-column:auto; }
+    .inventory-summary { grid-template-columns:1fr; }
     .setup-field.full { grid-column: auto; }
     .depth-selector { grid-template-columns: 1fr; }
     .sidebar { position: fixed; top: 0; left: 0; z-index: 40; background: var(--bg); box-shadow: 4px 0 24px rgba(0,0,0,0.5); width: min(240px, 78vw); }
@@ -372,6 +392,39 @@
   </div>
 </div>
 
+<div id="dataModalOverlay">
+  <div class="company-modal">
+    <h2>Business Data Check</h2>
+    <p>Upload a CSV or Excel file. VentureCore checks it for missing values, duplicate rows, and invalid numbers before analysis.</p>
+    <div class="company-form-grid">
+      <div><label>Data type</label><select id="dataType"><option>Sales data</option><option>Inventory data</option><option>Expenses</option><option>Customer feedback</option><option>Supplier data</option></select></div>
+      <div><label>CSV or XLSX file</label><input type="file" id="dataFile" accept=".csv,.xlsx"></div>
+    </div>
+    <div class="quality-result" id="qualityResult"></div>
+    <div class="company-modal-actions"><button class="export-pdf-btn" id="dataCancelBtn">Close</button><button class="primary" id="dataCheckBtn" style="padding:10px 15px;">Check Data</button></div>
+  </div>
+</div>
+
+<div id="inventoryModalOverlay">
+  <div class="company-modal">
+    <h2>Inventory Intelligence</h2>
+    <p>Add products, record stock movements, and act on low-stock alerts.</p>
+    <div class="company-form-grid">
+      <div><label>Product name *</label><input id="productName" placeholder="Coca-Cola 500ml"></div>
+      <div><label>SKU</label><input id="productSku" placeholder="CC-500"></div>
+      <div><label>Category</label><input id="productCategory" placeholder="Beverages"></div>
+      <div><label>Unit cost</label><input id="productCost" type="number" min="0" step="0.01" placeholder="2.50"></div>
+      <div><label>Selling price</label><input id="productPrice" type="number" min="0" step="0.01" placeholder="4.50"></div>
+      <div><label>Reorder point</label><input id="productReorder" type="number" min="0" step="1" placeholder="100"></div>
+      <div><label>Supplier lead time (days)</label><input id="productLeadTime" type="number" min="0" value="7"></div>
+    </div>
+    <div class="company-modal-actions"><button class="primary" id="productAddBtn" style="padding:10px 15px;">Add Product</button></div>
+    <div class="inventory-summary" id="inventorySummary"></div>
+    <div style="overflow:auto;"><table class="inventory-table"><thead><tr><th>Product</th><th>Stock</th><th>Value</th><th>Status</th><th>Actions</th></tr></thead><tbody id="inventoryTableBody"></tbody></table></div>
+    <div class="company-modal-actions"><button class="export-pdf-btn" id="inventoryCloseBtn">Close</button></div>
+  </div>
+</div>
+
 <div class="app-layout">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-inner">
@@ -382,6 +435,8 @@
       </div>
       <button class="new-research-btn" id="newResearchBtn">+ New Research</button>
       <button class="company-btn" id="companyProfileBtn">My Company</button>
+      <button class="inventory-btn" id="inventoryOpenBtn">Inventory</button>
+      <button class="data-btn" id="dataCheckOpenBtn">Check Business Data</button>
       <input type="text" class="history-search" id="historySearch" placeholder="Search research...">
       <div class="history-label">
         <span>History</span>
@@ -565,11 +620,25 @@ const userEmailEl = document.getElementById("userEmail");
 const logoutBtn = document.getElementById("logoutBtn");
 const newResearchBtn = document.getElementById("newResearchBtn");
 const companyProfileBtn = document.getElementById("companyProfileBtn");
+const inventoryOpenBtn = document.getElementById("inventoryOpenBtn");
+const dataCheckOpenBtn = document.getElementById("dataCheckOpenBtn");
 const companyModalOverlay = document.getElementById("companyModalOverlay");
 const companyUseRow = document.getElementById("companyUseRow");
 const useCompanyProfile = document.getElementById("useCompanyProfile");
 const companySaveBtn = document.getElementById("companySaveBtn");
 const companyCancelBtn = document.getElementById("companyCancelBtn");
+const dataModalOverlay = document.getElementById("dataModalOverlay");
+const dataFile = document.getElementById("dataFile");
+const dataType = document.getElementById("dataType");
+const dataCheckBtn = document.getElementById("dataCheckBtn");
+const dataCancelBtn = document.getElementById("dataCancelBtn");
+const qualityResult = document.getElementById("qualityResult");
+const inventoryModalOverlay = document.getElementById("inventoryModalOverlay");
+const inventoryCloseBtn = document.getElementById("inventoryCloseBtn");
+const productAddBtn = document.getElementById("productAddBtn");
+const inventoryTableBody = document.getElementById("inventoryTableBody");
+const inventorySummary = document.getElementById("inventorySummary");
+const productFields = { name: document.getElementById("productName"), sku: document.getElementById("productSku"), category: document.getElementById("productCategory"), unit_cost: document.getElementById("productCost"), selling_price: document.getElementById("productPrice"), reorder_point: document.getElementById("productReorder"), lead_time_days: document.getElementById("productLeadTime") };
 const historyList = document.getElementById("historyList");
 const historySearch = document.getElementById("historySearch");
 const favFilterBtn = document.getElementById("favFilterBtn");
@@ -698,6 +767,69 @@ companySaveBtn.addEventListener("click", async () => {
   companyModalOverlay.classList.remove("visible");
   companyUseRow.style.display = "flex";
   useCompanyProfile.checked = true;
+});
+
+dataCheckOpenBtn.addEventListener("click", () => {
+  if (isGuest) { authOverlay.style.display = "flex"; return; }
+  qualityResult.style.display = "none";
+  dataModalOverlay.classList.add("visible");
+});
+dataCancelBtn.addEventListener("click", () => dataModalOverlay.classList.remove("visible"));
+dataModalOverlay.addEventListener("click", event => { if (event.target === dataModalOverlay) dataModalOverlay.classList.remove("visible"); });
+dataCheckBtn.addEventListener("click", async () => {
+  if (!dataFile.files.length) { alert("Choose a CSV or XLSX file first."); return; }
+  const formData = new FormData();
+  formData.append("file", dataFile.files[0]); formData.append("data_type", dataType.value);
+  dataCheckBtn.disabled = true; dataCheckBtn.textContent = "Checking...";
+  const res = await fetch("/company/data/quality", { method: "POST", body: formData });
+  dataCheckBtn.disabled = false; dataCheckBtn.textContent = "Check Data";
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.detail || "Could not check this file."); return; }
+  qualityResult.innerHTML = "<strong>File summary</strong><br>" + data.row_count + " rows · " + data.column_count + " columns<br><br><strong>Quality check</strong><ul>" + data.warnings.map(item => "<li>" + item + "</li>").join("") + "</ul>";
+  qualityResult.style.display = "block";
+});
+
+function currency(value) { return new Intl.NumberFormat(undefined, { style:"currency", currency:"MYR", maximumFractionDigits:2 }).format(value || 0); }
+async function loadInventory() {
+  const res = await fetch("/inventory/dashboard");
+  if (!res.ok) { inventoryTableBody.innerHTML = '<tr><td colspan="5">Could not load inventory.</td></tr>'; return; }
+  const items = await res.json();
+  const totalValue = items.reduce((sum, item) => sum + item.inventory_value, 0);
+  const reorderCount = items.filter(item => item.status !== "Healthy").length;
+  inventorySummary.innerHTML = '<div class="inventory-stat"><span>Products</span><strong>' + items.length + '</strong></div><div class="inventory-stat"><span>Inventory value</span><strong>' + currency(totalValue) + '</strong></div><div class="inventory-stat"><span>Needs attention</span><strong>' + reorderCount + '</strong></div>';
+  inventoryTableBody.innerHTML = "";
+  if (!items.length) { inventoryTableBody.innerHTML = '<tr><td colspan="5">No products yet. Add your first product above.</td></tr>'; return; }
+  items.forEach(item => {
+    const statusClass = item.status === "Healthy" ? "healthy" : item.status === "Out of stock" ? "out" : "reorder";
+    const row = document.createElement("tr");
+    row.innerHTML = '<td><strong>' + item.name + '</strong><br><span style="color:var(--muted)">' + (item.sku || item.category || "No SKU") + '</span></td><td>' + item.current_stock + '</td><td>' + currency(item.inventory_value) + '</td><td><span class="stock-status ' + statusClass + '">' + item.status + '</span></td><td></td>';
+    const actions = row.querySelector("td:last-child");
+    [["+ Receive", "received"], ["− Sold", "sold"], ["Damage", "damaged"]].forEach(([label, type]) => { const button = document.createElement("button"); button.className = "stock-action"; button.textContent = label; button.addEventListener("click", () => recordStockMovement(item, type)); actions.appendChild(button); });
+    inventoryTableBody.appendChild(row);
+  });
+}
+async function recordStockMovement(item, transactionType) {
+  const quantity = Number(window.prompt("Quantity for " + item.name + ":"));
+  if (!Number.isFinite(quantity) || quantity <= 0) return;
+  const note = window.prompt("Optional note/reference:", "") || "";
+  const res = await fetch("/inventory/products/" + item.id + "/movement", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ transaction_type:transactionType, quantity, reference_note:note }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.detail || "Could not record stock movement."); return; }
+  loadInventory();
+}
+inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } inventoryModalOverlay.classList.add("visible"); await loadInventory(); });
+inventoryCloseBtn.addEventListener("click", () => inventoryModalOverlay.classList.remove("visible"));
+inventoryModalOverlay.addEventListener("click", event => { if (event.target === inventoryModalOverlay) inventoryModalOverlay.classList.remove("visible"); });
+productAddBtn.addEventListener("click", async () => {
+  const payload = Object.fromEntries(Object.entries(productFields).map(([key, field]) => [key, key === "name" || key === "sku" || key === "category" ? field.value.trim() : Number(field.value || 0)]));
+  if (!payload.name) { alert("Enter a product name."); return; }
+  productAddBtn.disabled = true;
+  const res = await fetch("/inventory/products", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  productAddBtn.disabled = false;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.detail || "Could not add product."); return; }
+  Object.values(productFields).forEach(field => { if (field.id !== "productLeadTime") field.value = ""; });
+  productFields.lead_time_days.value = 7; await loadInventory();
 });
 
 function buildResearchBrief() {
@@ -1045,6 +1177,8 @@ function enterGuestMode() {
   historyList.style.display = "none";
   guestNote.style.display = "block";
   companyProfileBtn.style.display = "none";
+  inventoryOpenBtn.style.display = "none";
+  dataCheckOpenBtn.style.display = "none";
   companyUseRow.style.display = "none";
 }
 
@@ -1058,6 +1192,8 @@ async function afterLogin(email) {
   historyList.style.display = "flex";
   userEmailEl.textContent = email;
   companyProfileBtn.style.display = "block";
+  inventoryOpenBtn.style.display = "block";
+  dataCheckOpenBtn.style.display = "block";
   const profileRes = await fetch("/company/profile");
   companyUseRow.style.display = profileRes.ok && await profileRes.json() ? "flex" : "none";
   await loadHistory();
