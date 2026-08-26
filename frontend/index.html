@@ -65,6 +65,8 @@
   .company-use { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: -4px 0 14px; cursor: pointer; }
   #companyModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
   #companyModalOverlay.visible { display: flex; }
+  #dataModalOverlay, #inventoryModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
+  #dataModalOverlay.visible, #inventoryModalOverlay.visible { display: flex; }
   .company-modal { width: min(680px, 100%); max-height: 88vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
   .company-modal h2 { margin: 0 0 4px; font-size: 18px; }
   .company-modal p { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
@@ -771,6 +773,7 @@ companySaveBtn.addEventListener("click", async () => {
 
 dataCheckOpenBtn.addEventListener("click", () => {
   if (isGuest) { authOverlay.style.display = "flex"; return; }
+  inventoryModalOverlay.classList.remove("visible");
   qualityResult.style.display = "none";
   dataModalOverlay.classList.add("visible");
 });
@@ -817,7 +820,7 @@ async function recordStockMovement(item, transactionType) {
   if (!res.ok) { alert(data.detail || "Could not record stock movement."); return; }
   loadInventory();
 }
-inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } inventoryModalOverlay.classList.add("visible"); await loadInventory(); });
+inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } dataModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.add("visible"); await loadInventory(); });
 inventoryCloseBtn.addEventListener("click", () => inventoryModalOverlay.classList.remove("visible"));
 inventoryModalOverlay.addEventListener("click", event => { if (event.target === inventoryModalOverlay) inventoryModalOverlay.classList.remove("visible"); });
 productAddBtn.addEventListener("click", async () => {
