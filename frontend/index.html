@@ -100,6 +100,15 @@
   .stock-action:hover { color:var(--accent); border-color:var(--accent); }
   .reorder-cell strong { color:var(--warn); }
   .reorder-cell span { color:var(--muted); font-size:10.5px; }
+  .inventory-ai { margin:14px 0; padding:16px; border:1px solid rgba(124,156,255,.35); border-radius:12px; background:rgba(124,156,255,.05); }
+  .inventory-ai h3 { margin:0 0 4px; font-size:14px; }
+  .inventory-ai p { margin:0 0 10px; }
+  .inventory-quick-questions { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .inventory-question-btn { border:1px solid var(--border); background:var(--panel2); color:var(--muted); border-radius:999px; padding:5px 9px; font-size:11px; cursor:pointer; }
+  .inventory-question-btn:hover { color:var(--accent); border-color:var(--accent); }
+  .inventory-ai-input { display:flex; gap:8px; align-items:flex-end; }
+  .inventory-ai-input textarea { flex:1; min-height:44px; max-height:100px; resize:vertical; border:1px solid var(--border); background:var(--panel2); color:var(--text); padding:10px; border-radius:9px; font:inherit; font-size:13px; }
+  .inventory-ai-answer { display:none; margin-top:12px; padding:12px; border-radius:9px; background:var(--panel2); color:var(--text); white-space:pre-wrap; font-size:12.5px; line-height:1.6; }
   .new-research-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .new-research-btn:disabled:hover { border-color: var(--border); }
   .history-search { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 12px; margin-bottom: 10px; flex-shrink: 0; }
@@ -448,6 +457,20 @@
     <div class="company-modal-actions"><button class="primary" id="productAddBtn" style="padding:10px 15px;">Add Product</button></div>
     </div>
     <div class="inventory-summary" id="inventorySummary"></div>
+    <div class="inventory-ai">
+      <h3>Ask the Inventory Agent</h3>
+      <p>It answers using your recorded products, stock movements, suppliers, costs, and reorder calculations.</p>
+      <div class="inventory-quick-questions">
+        <button class="inventory-question-btn" data-question="What should I reorder now and why?">What should I reorder?</button>
+        <button class="inventory-question-btn" data-question="Which products are most likely to run out first?">What may run out?</button>
+        <button class="inventory-question-btn" data-question="Summarize my inventory risks and estimated reorder cost.">Summarize inventory risk</button>
+      </div>
+      <div class="inventory-ai-input">
+        <textarea id="inventoryQuestion" placeholder="Ask about stock, suppliers, reorder costs, or inventory risk..."></textarea>
+        <button class="primary" id="inventoryAskBtn" style="padding:11px 15px;">Ask AI</button>
+      </div>
+      <div class="inventory-ai-answer" id="inventoryAiAnswer"></div>
+    </div>
     <div style="overflow:auto;"><table class="inventory-table"><thead><tr><th>Product</th><th>Stock</th><th>Sales/day</th><th>Days left</th><th>Recommended reorder</th><th>Status</th><th>Actions</th></tr></thead><tbody id="inventoryTableBody"></tbody></table></div>
     <div class="company-modal-actions"><button class="export-pdf-btn" id="inventoryCloseBtn">Close</button></div>
   </div>
@@ -673,6 +696,9 @@ const supplierEmail = document.getElementById("supplierEmail");
 const supplierLeadTime = document.getElementById("supplierLeadTime");
 const supplierTerms = document.getElementById("supplierTerms");
 const productSupplier = document.getElementById("productSupplier");
+const inventoryQuestion = document.getElementById("inventoryQuestion");
+const inventoryAskBtn = document.getElementById("inventoryAskBtn");
+const inventoryAiAnswer = document.getElementById("inventoryAiAnswer");
 const productFields = { name: document.getElementById("productName"), sku: document.getElementById("productSku"), category: document.getElementById("productCategory"), unit_cost: document.getElementById("productCost"), selling_price: document.getElementById("productPrice"), reorder_point: document.getElementById("productReorder"), lead_time_days: document.getElementById("productLeadTime") };
 const historyList = document.getElementById("historyList");
 const historySearch = document.getElementById("historySearch");
@@ -857,6 +883,23 @@ async function loadInventory() {
     inventoryTableBody.appendChild(row);
   });
 }
+async function askInventoryAgent(questionText) {
+  const question = (questionText || inventoryQuestion.value).trim();
+  if (!question) { alert("Enter an inventory question."); return; }
+  inventoryQuestion.value = question;
+  inventoryAskBtn.disabled = true;
+  inventoryAskBtn.textContent = "Thinking...";
+  inventoryAiAnswer.style.display = "block";
+  inventoryAiAnswer.textContent = "The Inventory Agent is reviewing your company data...";
+  const res = await fetch("/inventory/ask", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ question }) });
+  const data = await res.json().catch(() => ({}));
+  inventoryAskBtn.disabled = false;
+  inventoryAskBtn.textContent = "Ask AI";
+  inventoryAiAnswer.textContent = res.ok ? data.answer : (data.detail || "The Inventory Agent could not answer right now.");
+}
+inventoryAskBtn.addEventListener("click", () => askInventoryAgent());
+document.querySelectorAll(".inventory-question-btn").forEach(button => button.addEventListener("click", () => askInventoryAgent(button.dataset.question)));
+inventoryQuestion.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); askInventoryAgent(); } });
 async function recordStockMovement(item, transactionType) {
   const quantity = Number(window.prompt("Quantity for " + item.name + ":"));
   if (!Number.isFinite(quantity) || quantity <= 0) return;

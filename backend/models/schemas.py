@@ -174,3 +174,11 @@ class InventoryItem(BaseModel):
     recommended_reorder_quantity: int
     estimated_reorder_cost: float
     status: str
+
+
+class InventoryQuestionRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=600)
+
+
+class InventoryQuestionResponse(BaseModel):
+    answer: str

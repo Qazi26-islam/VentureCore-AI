@@ -25,9 +25,10 @@ from backend.models.schemas import (
     CompanyProfileRequest, CompanyProfileResponse,
     DataQualityResponse,
     SupplierRequest, SupplierItem, ProductRequest, StockMovementRequest, InventoryItem,
+    InventoryQuestionRequest, InventoryQuestionResponse,
 )
 from backend.agents.coordinator import run_research
-from backend.agents import followup
+from backend.agents import followup, inventory as inventory_agent
 from backend import jobs
 from backend.db import get_connection
 
@@ -283,6 +284,31 @@ def inventory_dashboard(request: Request):
             status=status,
         ))
     return result
+
+
+@router.post("/inventory/ask", response_model=InventoryQuestionResponse)
+def ask_inventory_agent(body: InventoryQuestionRequest, request: Request):
+    user_id = require_login(request)
+    items = inventory_dashboard(request)
+    conn = get_connection()
+    profile = conn.execute(
+        """SELECT company_name, industry, country, currency, products_services,
+                  target_customers, business_goals, business_stage
+           FROM company_profiles WHERE user_id = ?""",
+        (user_id,),
+    ).fetchone()
+    conn.close()
+    company_profile = dict(profile) if profile else {"currency": "MYR"}
+    try:
+        answer = inventory_agent.run(
+            question=body.question,
+            company_profile=company_profile,
+            inventory_items=[item.model_dump() for item in items],
+        )
+    except Exception as exc:
+        logger.exception("Inventory Agent failed: %s", exc)
+        raise HTTPException(status_code=502, detail="The Inventory Agent is temporarily unavailable. Please try again.")
+    return InventoryQuestionResponse(answer=answer)
 
 
 @router.post("/research/start", response_model=StartResponse)
