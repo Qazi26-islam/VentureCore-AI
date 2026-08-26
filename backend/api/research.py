@@ -27,9 +27,10 @@ from backend.models.schemas import (
     SupplierRequest, SupplierItem, ProductRequest, StockMovementRequest, InventoryItem,
     InventoryQuestionRequest, InventoryQuestionResponse,
     CustomerRequest, CustomerItem, SaleRequest, SaleRecord, SalesDashboardResponse,
+    SalesQuestionRequest, SalesQuestionResponse,
 )
 from backend.agents.coordinator import run_research
-from backend.agents import followup, inventory as inventory_agent
+from backend.agents import followup, inventory as inventory_agent, sales as sales_agent
 from backend import jobs
 from backend.db import get_connection
 
@@ -443,6 +444,63 @@ def sales_dashboard(request: Request):
         top_customer=top_customer_row["name"] if top_customer_row else None,
         recent_sales=[SaleRecord(**dict(row)) for row in rows],
     )
+
+
+@router.post("/sales/ask", response_model=SalesQuestionResponse)
+def ask_sales_agent(body: SalesQuestionRequest, request: Request):
+    user_id = require_login(request)
+    dashboard = sales_dashboard(request)
+    conn = get_connection()
+    profile = conn.execute(
+        """SELECT company_name, industry, country, currency, products_services,
+                  target_customers, business_goals, business_stage
+           FROM company_profiles WHERE user_id = ?""",
+        (user_id,),
+    ).fetchone()
+    customer_performance = conn.execute(
+        """SELECT c.id, c.name, c.segment, COUNT(s.id) AS order_count,
+                  COALESCE(SUM(s.total_amount), 0) AS total_revenue,
+                  COALESCE(SUM(CASE WHEN s.payment_status != 'paid' THEN s.total_amount ELSE 0 END), 0) AS outstanding_amount,
+                  MAX(s.created_at) AS last_purchase
+           FROM customers c LEFT JOIN sales_orders s ON s.customer_id = c.id
+           WHERE c.user_id = ? GROUP BY c.id
+           ORDER BY total_revenue DESC, c.name COLLATE NOCASE LIMIT 25""",
+        (user_id,),
+    ).fetchall()
+    product_performance = conn.execute(
+        """SELECT p.id, p.name, SUM(s.quantity) AS units_sold,
+                  SUM(s.total_amount) AS revenue
+           FROM sales_orders s JOIN products p ON p.id = s.product_id
+           WHERE s.user_id = ? AND s.created_at >= datetime('now', '-30 days')
+           GROUP BY p.id ORDER BY revenue DESC LIMIT 25""",
+        (user_id,),
+    ).fetchall()
+    outstanding_invoices = conn.execute(
+        """SELECT s.id, c.name AS customer_name, p.name AS product_name,
+                  s.total_amount, s.due_date,
+                  CASE WHEN s.due_date IS NOT NULL AND date(s.due_date) < date('now')
+                       THEN 'overdue' ELSE 'due' END AS status
+           FROM sales_orders s
+           JOIN products p ON p.id = s.product_id
+           LEFT JOIN customers c ON c.id = s.customer_id
+           WHERE s.user_id = ? AND s.payment_status != 'paid'
+           ORDER BY COALESCE(s.due_date, '9999-12-31'), s.created_at LIMIT 50""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    sales_context = {
+        "company_profile": dict(profile) if profile else {"currency": "MYR"},
+        "dashboard": dashboard.model_dump(),
+        "customer_performance": [dict(row) for row in customer_performance],
+        "product_performance_last_30_days": [dict(row) for row in product_performance],
+        "outstanding_invoices": [dict(row) for row in outstanding_invoices],
+    }
+    try:
+        answer = sales_agent.run(body.question, sales_context)
+    except Exception as exc:
+        logger.exception("Sales Agent failed: %s", exc)
+        raise HTTPException(status_code=502, detail="The Sales Agent is temporarily unavailable. Please try again.")
+    return SalesQuestionResponse(answer=answer)
 
 
 @router.post("/research/start", response_model=StartResponse)

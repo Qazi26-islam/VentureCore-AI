@@ -225,3 +225,11 @@ class SalesDashboardResponse(BaseModel):
     orders_30d: int
     top_customer: Optional[str] = None
     recent_sales: List[SaleRecord]
+
+
+class SalesQuestionRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=600)
+
+
+class SalesQuestionResponse(BaseModel):
+    answer: str
