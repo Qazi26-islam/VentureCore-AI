@@ -68,6 +68,7 @@
   #dataModalOverlay, #inventoryModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
   #dataModalOverlay.visible, #inventoryModalOverlay.visible { display: flex; }
   .company-modal { width: min(680px, 100%); max-height: 88vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
+  #inventoryModalOverlay .company-modal { width:min(1080px, 100%); }
   .company-modal h2 { margin: 0 0 4px; font-size: 18px; }
   .company-modal p { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
   .company-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
@@ -78,7 +79,13 @@
   .company-modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
   .quality-result { display:none; margin-top:16px; padding:12px; border-radius:10px; background:var(--panel2); font-size:12.5px; line-height:1.55; }
   .quality-result ul { padding-left:18px; margin:8px 0 0; }
-  .inventory-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:14px 0; }
+  .inventory-section { margin-top:16px; padding:16px; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,.01); }
+  .inventory-section h3 { margin:0 0 4px; font-size:14px; }
+  .inventory-section-note { color:var(--muted); font-size:11.5px; margin-bottom:12px; }
+  .supplier-list { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
+  .supplier-chip { border:1px solid var(--border); border-radius:999px; padding:5px 9px; color:var(--muted); font-size:11px; }
+  .supplier-chip strong { color:var(--text); }
+  .inventory-summary { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:14px 0; }
   .inventory-stat { padding:10px; background:var(--panel2); border-radius:9px; }
   .inventory-stat span { display:block; color:var(--muted); font-size:10.5px; }
   .inventory-stat strong { display:block; margin-top:3px; font-size:15px; }
@@ -91,6 +98,8 @@
   .stock-status.out { color:var(--error); background:rgba(248,113,113,.12); }
   .stock-action { border:1px solid var(--border); background:var(--panel); color:var(--muted); border-radius:6px; font-size:11px; padding:4px 6px; cursor:pointer; }
   .stock-action:hover { color:var(--accent); border-color:var(--accent); }
+  .reorder-cell strong { color:var(--warn); }
+  .reorder-cell span { color:var(--muted); font-size:10.5px; }
   .new-research-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .new-research-btn:disabled:hover { border-color: var(--border); }
   .history-search { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 12px; margin-bottom: 10px; flex-shrink: 0; }
@@ -410,19 +419,36 @@
 <div id="inventoryModalOverlay">
   <div class="company-modal">
     <h2>Inventory Intelligence</h2>
-    <p>Add products, record stock movements, and act on low-stock alerts.</p>
+    <p>Track stock, sales velocity, supplier lead times, and automatic reorder recommendations.</p>
+    <div class="inventory-section">
+      <h3>Suppliers</h3>
+      <div class="inventory-section-note">Add suppliers once, then connect them to products and lead-time calculations.</div>
+      <div class="company-form-grid">
+        <div><label>Supplier name *</label><input id="supplierName" placeholder="ABC Wholesale"></div>
+        <div><label>Email</label><input id="supplierEmail" type="email" placeholder="orders@supplier.com"></div>
+        <div><label>Lead time (days)</label><input id="supplierLeadTime" type="number" min="0" value="7"></div>
+        <div><label>Payment terms</label><input id="supplierTerms" placeholder="Net 30"></div>
+      </div>
+      <div class="company-modal-actions"><button class="export-pdf-btn" id="supplierAddBtn">Add Supplier</button></div>
+      <div class="supplier-list" id="supplierList"><span class="supplier-chip">No suppliers yet</span></div>
+    </div>
+    <div class="inventory-section">
+      <h3>Add a product</h3>
+      <div class="inventory-section-note">The reorder engine combines your threshold, supplier lead time, and recorded sales.</div>
     <div class="company-form-grid">
       <div><label>Product name *</label><input id="productName" placeholder="Coca-Cola 500ml"></div>
       <div><label>SKU</label><input id="productSku" placeholder="CC-500"></div>
       <div><label>Category</label><input id="productCategory" placeholder="Beverages"></div>
+      <div><label>Supplier</label><select id="productSupplier"><option value="">No supplier</option></select></div>
       <div><label>Unit cost</label><input id="productCost" type="number" min="0" step="0.01" placeholder="2.50"></div>
       <div><label>Selling price</label><input id="productPrice" type="number" min="0" step="0.01" placeholder="4.50"></div>
       <div><label>Reorder point</label><input id="productReorder" type="number" min="0" step="1" placeholder="100"></div>
       <div><label>Supplier lead time (days)</label><input id="productLeadTime" type="number" min="0" value="7"></div>
     </div>
     <div class="company-modal-actions"><button class="primary" id="productAddBtn" style="padding:10px 15px;">Add Product</button></div>
+    </div>
     <div class="inventory-summary" id="inventorySummary"></div>
-    <div style="overflow:auto;"><table class="inventory-table"><thead><tr><th>Product</th><th>Stock</th><th>Value</th><th>Status</th><th>Actions</th></tr></thead><tbody id="inventoryTableBody"></tbody></table></div>
+    <div style="overflow:auto;"><table class="inventory-table"><thead><tr><th>Product</th><th>Stock</th><th>Sales/day</th><th>Days left</th><th>Recommended reorder</th><th>Status</th><th>Actions</th></tr></thead><tbody id="inventoryTableBody"></tbody></table></div>
     <div class="company-modal-actions"><button class="export-pdf-btn" id="inventoryCloseBtn">Close</button></div>
   </div>
 </div>
@@ -640,6 +666,13 @@ const inventoryCloseBtn = document.getElementById("inventoryCloseBtn");
 const productAddBtn = document.getElementById("productAddBtn");
 const inventoryTableBody = document.getElementById("inventoryTableBody");
 const inventorySummary = document.getElementById("inventorySummary");
+const supplierAddBtn = document.getElementById("supplierAddBtn");
+const supplierList = document.getElementById("supplierList");
+const supplierName = document.getElementById("supplierName");
+const supplierEmail = document.getElementById("supplierEmail");
+const supplierLeadTime = document.getElementById("supplierLeadTime");
+const supplierTerms = document.getElementById("supplierTerms");
+const productSupplier = document.getElementById("productSupplier");
 const productFields = { name: document.getElementById("productName"), sku: document.getElementById("productSku"), category: document.getElementById("productCategory"), unit_cost: document.getElementById("productCost"), selling_price: document.getElementById("productPrice"), reorder_point: document.getElementById("productReorder"), lead_time_days: document.getElementById("productLeadTime") };
 const historyList = document.getElementById("historyList");
 const historySearch = document.getElementById("historySearch");
@@ -793,19 +826,32 @@ dataCheckBtn.addEventListener("click", async () => {
 });
 
 function currency(value) { return new Intl.NumberFormat(undefined, { style:"currency", currency:"MYR", maximumFractionDigits:2 }).format(value || 0); }
+function escapeHtml(value) { const holder = document.createElement("div"); holder.textContent = String(value ?? ""); return holder.innerHTML; }
+
+async function loadSuppliers() {
+  const res = await fetch("/inventory/suppliers");
+  if (!res.ok) { supplierList.innerHTML = '<span class="supplier-chip">Could not load suppliers</span>'; return; }
+  const suppliers = await res.json();
+  productSupplier.innerHTML = '<option value="">No supplier</option>' + suppliers.map(supplier => '<option value="' + supplier.id + '" data-lead-time="' + supplier.lead_time_days + '">' + escapeHtml(supplier.name) + '</option>').join("");
+  supplierList.innerHTML = suppliers.length ? suppliers.map(supplier => '<span class="supplier-chip"><strong>' + escapeHtml(supplier.name) + '</strong> · ' + supplier.lead_time_days + ' day lead time' + (supplier.payment_terms ? ' · ' + escapeHtml(supplier.payment_terms) : '') + '</span>').join("") : '<span class="supplier-chip">No suppliers yet</span>';
+}
+
 async function loadInventory() {
   const res = await fetch("/inventory/dashboard");
-  if (!res.ok) { inventoryTableBody.innerHTML = '<tr><td colspan="5">Could not load inventory.</td></tr>'; return; }
+  if (!res.ok) { inventoryTableBody.innerHTML = '<tr><td colspan="7">Could not load inventory.</td></tr>'; return; }
   const items = await res.json();
   const totalValue = items.reduce((sum, item) => sum + item.inventory_value, 0);
   const reorderCount = items.filter(item => item.status !== "Healthy").length;
-  inventorySummary.innerHTML = '<div class="inventory-stat"><span>Products</span><strong>' + items.length + '</strong></div><div class="inventory-stat"><span>Inventory value</span><strong>' + currency(totalValue) + '</strong></div><div class="inventory-stat"><span>Needs attention</span><strong>' + reorderCount + '</strong></div>';
+  const reorderCost = items.reduce((sum, item) => sum + item.estimated_reorder_cost, 0);
+  inventorySummary.innerHTML = '<div class="inventory-stat"><span>Products</span><strong>' + items.length + '</strong></div><div class="inventory-stat"><span>Inventory value</span><strong>' + currency(totalValue) + '</strong></div><div class="inventory-stat"><span>Needs attention</span><strong>' + reorderCount + '</strong></div><div class="inventory-stat"><span>Estimated reorder cost</span><strong>' + currency(reorderCost) + '</strong></div>';
   inventoryTableBody.innerHTML = "";
-  if (!items.length) { inventoryTableBody.innerHTML = '<tr><td colspan="5">No products yet. Add your first product above.</td></tr>'; return; }
+  if (!items.length) { inventoryTableBody.innerHTML = '<tr><td colspan="7">No products yet. Add your first product above.</td></tr>'; return; }
   items.forEach(item => {
     const statusClass = item.status === "Healthy" ? "healthy" : item.status === "Out of stock" ? "out" : "reorder";
+    const daysLeft = item.days_of_stock === null ? "No sales data" : item.days_of_stock + " days";
+    const recommendation = item.recommended_reorder_quantity > 0 ? '<strong>' + item.recommended_reorder_quantity + ' units</strong><br><span>' + currency(item.estimated_reorder_cost) + '</span>' : '<span>Not needed</span>';
     const row = document.createElement("tr");
-    row.innerHTML = '<td><strong>' + item.name + '</strong><br><span style="color:var(--muted)">' + (item.sku || item.category || "No SKU") + '</span></td><td>' + item.current_stock + '</td><td>' + currency(item.inventory_value) + '</td><td><span class="stock-status ' + statusClass + '">' + item.status + '</span></td><td></td>';
+    row.innerHTML = '<td><strong>' + escapeHtml(item.name) + '</strong><br><span style="color:var(--muted)">' + escapeHtml(item.sku || item.category || "No SKU") + (item.supplier_name ? ' · ' + escapeHtml(item.supplier_name) : '') + '</span></td><td><strong>' + item.current_stock + '</strong><br><span style="color:var(--muted)">' + currency(item.inventory_value) + '</span></td><td>' + item.average_daily_sales + '</td><td>' + daysLeft + '</td><td class="reorder-cell">' + recommendation + '</td><td><span class="stock-status ' + statusClass + '">' + escapeHtml(item.status) + '</span></td><td></td>';
     const actions = row.querySelector("td:last-child");
     [["+ Receive", "received"], ["− Sold", "sold"], ["Damage", "damaged"]].forEach(([label, type]) => { const button = document.createElement("button"); button.className = "stock-action"; button.textContent = label; button.addEventListener("click", () => recordStockMovement(item, type)); actions.appendChild(button); });
     inventoryTableBody.appendChild(row);
@@ -820,11 +866,27 @@ async function recordStockMovement(item, transactionType) {
   if (!res.ok) { alert(data.detail || "Could not record stock movement."); return; }
   loadInventory();
 }
-inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } dataModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.add("visible"); await loadInventory(); });
+inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } dataModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.add("visible"); await Promise.all([loadSuppliers(), loadInventory()]); });
 inventoryCloseBtn.addEventListener("click", () => inventoryModalOverlay.classList.remove("visible"));
 inventoryModalOverlay.addEventListener("click", event => { if (event.target === inventoryModalOverlay) inventoryModalOverlay.classList.remove("visible"); });
+supplierAddBtn.addEventListener("click", async () => {
+  const payload = { name:supplierName.value.trim(), contact_name:"", email:supplierEmail.value.trim(), phone:"", lead_time_days:Number(supplierLeadTime.value || 0), payment_terms:supplierTerms.value.trim() };
+  if (!payload.name) { alert("Enter a supplier name."); return; }
+  supplierAddBtn.disabled = true;
+  const res = await fetch("/inventory/suppliers", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  supplierAddBtn.disabled = false;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.detail || "Could not add supplier."); return; }
+  supplierName.value = ""; supplierEmail.value = ""; supplierLeadTime.value = 7; supplierTerms.value = "";
+  await loadSuppliers();
+});
+productSupplier.addEventListener("change", () => {
+  const selected = productSupplier.options[productSupplier.selectedIndex];
+  if (selected && selected.dataset.leadTime) productFields.lead_time_days.value = selected.dataset.leadTime;
+});
 productAddBtn.addEventListener("click", async () => {
   const payload = Object.fromEntries(Object.entries(productFields).map(([key, field]) => [key, key === "name" || key === "sku" || key === "category" ? field.value.trim() : Number(field.value || 0)]));
+  payload.supplier_id = productSupplier.value ? Number(productSupplier.value) : null;
   if (!payload.name) { alert("Enter a product name."); return; }
   productAddBtn.disabled = true;
   const res = await fetch("/inventory/products", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
@@ -832,7 +894,7 @@ productAddBtn.addEventListener("click", async () => {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { alert(data.detail || "Could not add product."); return; }
   Object.values(productFields).forEach(field => { if (field.id !== "productLeadTime") field.value = ""; });
-  productFields.lead_time_days.value = 7; await loadInventory();
+  productSupplier.value = ""; productFields.lead_time_days.value = 7; await loadInventory();
 });
 
 function buildResearchBrief() {

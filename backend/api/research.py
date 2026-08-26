@@ -4,6 +4,7 @@ import io
 import threading
 import re
 import csv
+import math
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
@@ -23,7 +24,7 @@ from backend.models.schemas import (
     RenameRequest, FavoriteRequest,
     CompanyProfileRequest, CompanyProfileResponse,
     DataQualityResponse,
-    SupplierRequest, ProductRequest, StockMovementRequest, InventoryItem,
+    SupplierRequest, SupplierItem, ProductRequest, StockMovementRequest, InventoryItem,
 )
 from backend.agents.coordinator import run_research
 from backend.agents import followup
@@ -167,6 +168,19 @@ def create_supplier(body: SupplierRequest, request: Request):
     return {"id": supplier_id, "status": "created"}
 
 
+@router.get("/inventory/suppliers", response_model=list[SupplierItem])
+def list_suppliers(request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT id, name, contact_name, email, phone, lead_time_days, payment_terms
+           FROM suppliers WHERE user_id = ? ORDER BY name COLLATE NOCASE""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return [SupplierItem(**dict(row)) for row in rows]
+
+
 @router.post("/inventory/products")
 def create_product(body: ProductRequest, request: Request):
     user_id = require_login(request)
@@ -221,7 +235,12 @@ def inventory_dashboard(request: Request):
     user_id = require_login(request)
     conn = get_connection()
     rows = conn.execute(
-        """SELECT p.*, s.name AS supplier_name, COALESCE(SUM(t.quantity_change), 0) AS current_stock
+        """SELECT p.*, s.name AS supplier_name,
+                  COALESCE(SUM(t.quantity_change), 0) AS current_stock,
+                  COALESCE(SUM(CASE
+                      WHEN t.transaction_type = 'sold'
+                       AND t.created_at >= datetime('now', '-30 days')
+                      THEN ABS(t.quantity_change) ELSE 0 END), 0) AS units_sold_30d
            FROM products p
            LEFT JOIN suppliers s ON s.id = p.supplier_id
            LEFT JOIN inventory_transactions t ON t.product_id = p.id
@@ -234,13 +253,35 @@ def inventory_dashboard(request: Request):
     result = []
     for row in rows:
         stock = float(row["current_stock"])
+        units_sold_30d = float(row["units_sold_30d"])
+        average_daily_sales = units_sold_30d / 30
+        days_of_stock = round(stock / average_daily_sales, 1) if average_daily_sales > 0 else None
+        lead_time_days = int(row["lead_time_days"] or 0)
+        reorder_point = float(row["reorder_point"] or 0)
+
+        demand_target = math.ceil(average_daily_sales * (lead_time_days + 14))
+        minimum_target = math.ceil(reorder_point * 2)
+        target_stock = max(demand_target, minimum_target)
+        recommended_reorder_quantity = max(0, math.ceil(target_stock - stock))
+
         if stock <= 0:
             status = "Out of stock"
-        elif stock <= row["reorder_point"]:
+        elif stock <= reorder_point or (days_of_stock is not None and days_of_stock <= lead_time_days):
             status = "Reorder now"
+        elif days_of_stock is not None and days_of_stock <= lead_time_days + 7:
+            status = "Order soon"
         else:
             status = "Healthy"
-        result.append(InventoryItem(id=row["id"], sku=row["sku"] or "", name=row["name"], category=row["category"] or "", current_stock=stock, unit_cost=row["unit_cost"], selling_price=row["selling_price"], inventory_value=round(stock * row["unit_cost"], 2), reorder_point=row["reorder_point"], lead_time_days=row["lead_time_days"], supplier_name=row["supplier_name"], status=status))
+        result.append(InventoryItem(
+            id=row["id"], sku=row["sku"] or "", name=row["name"], category=row["category"] or "",
+            current_stock=stock, unit_cost=row["unit_cost"], selling_price=row["selling_price"],
+            inventory_value=round(stock * row["unit_cost"], 2), reorder_point=reorder_point,
+            lead_time_days=lead_time_days, supplier_name=row["supplier_name"],
+            units_sold_30d=round(units_sold_30d, 2), average_daily_sales=round(average_daily_sales, 2),
+            days_of_stock=days_of_stock, recommended_reorder_quantity=recommended_reorder_quantity,
+            estimated_reorder_cost=round(recommended_reorder_quantity * float(row["unit_cost"]), 2),
+            status=status,
+        ))
     return result
 
 

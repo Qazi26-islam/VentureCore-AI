@@ -134,6 +134,10 @@ class SupplierRequest(BaseModel):
     payment_terms: str = Field(default="", max_length=120)
 
 
+class SupplierItem(SupplierRequest):
+    id: int
+
+
 class ProductRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=180)
     sku: str = Field(default="", max_length=80)
@@ -164,4 +168,9 @@ class InventoryItem(BaseModel):
     reorder_point: float
     lead_time_days: int
     supplier_name: Optional[str] = None
+    units_sold_30d: float
+    average_daily_sales: float
+    days_of_stock: Optional[float] = None
+    recommended_reorder_quantity: int
+    estimated_reorder_cost: float
     status: str
