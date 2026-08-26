@@ -2437,4 +2437,1307 @@ followupSendBtn.addEventListener("click", async () => {
 });
 </script>
 </body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VentureCore AI</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #12161f;
+    --panel2: #171c28;
+    --border: #232838;
+    --text: #e6e9f0;
+    --muted: #7a8399;
+    --accent: #7c9cff;
+    --accent-glow: rgba(124, 156, 255, 0.35);
+    --done: #4ade80;
+    --error: #f87171;
+    --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { background: radial-gradient(circle at 20% 0%, #161c2b 0%, var(--bg) 55%); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  #authOverlay { position: fixed; inset: 0; background: rgba(5, 7, 12, 0.85); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+  .auth-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: min(320px, 100%); }
+  .auth-card h2 { margin: 0 0 4px; font-size: 20px; text-align: center; }
+  .auth-card p.sub { color: var(--muted); font-size: 13px; text-align: center; margin: 0 0 20px; }
+  .auth-field { margin-bottom: 12px; }
+  .auth-field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .auth-field input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 14px; }
+  .auth-field input:focus { outline: none; border-color: var(--accent); }
+  .auth-submit { width: 100%; padding: 11px; border-radius: 8px; border: none; background: linear-gradient(135deg, #7c9cff, #5b7cfa); color: white; font-weight: 600; font-size: 14px; cursor: pointer; margin-top: 6px; }
+  .auth-error { color: var(--error); font-size: 12px; margin-top: 8px; min-height: 14px; text-align: center; }
+  .auth-toggle { text-align: center; font-size: 12px; color: var(--muted); margin-top: 16px; }
+  .auth-toggle a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .auth-skip { text-align: center; font-size: 12px; color: var(--muted); margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .auth-skip a { color: var(--muted); cursor: pointer; text-decoration: underline; }
+  .auth-skip a:hover { color: var(--text); }
+  .app-layout { display: flex; height: 100vh; position: relative; }
+  .sidebar-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 39; }
+  .sidebar-backdrop.visible { display: block; }
+  .sidebar { width: 240px; flex-shrink: 0; height: 100vh; border-right: 1px solid var(--border); padding: 22px 14px 20px; display: flex; flex-direction: column; transition: width 0.2s, padding 0.2s, opacity 0.2s; overflow: hidden; }
+  .sidebar.collapsed { width: 0; padding: 22px 0 20px; opacity: 0; border-right: none; }
+  .sidebar-inner { width: 212px; flex-shrink: 0; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .brand-name { text-align: center; font-size: 15px; font-weight: 800; letter-spacing: -0.2px; color: var(--text); margin-bottom: 16px; flex-shrink: 0; }
+  .sidebar-user { font-size: 12px; color: var(--muted); padding: 0 4px 14px; border-bottom: 1px solid var(--border); margin-bottom: 14px; word-break: break-all; flex-shrink: 0; }
+  .sidebar-user .email { color: var(--text); font-weight: 600; display: block; margin-bottom: 6px; }
+  .logout-btn { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 11px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+  .logout-btn:hover { color: var(--text); border-color: var(--muted); }
+  .new-research-btn { width: 100%; padding: 7px; border-radius: 8px; border: 1px dashed var(--border); background: none; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 12px; flex-shrink: 0; }
+  .new-research-btn:hover { border-color: var(--accent); }
+  .company-btn { width: 100%; padding: 7px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 8px; }
+  .company-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .company-use { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: -4px 0 14px; cursor: pointer; }
+  #companyModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
+  #companyModalOverlay.visible { display: flex; }
+  .company-modal { width: min(680px, 100%); max-height: 88vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
+  .company-modal h2 { margin: 0 0 4px; font-size: 18px; }
+  .company-modal p { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
+  .company-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+  .company-form-grid .full { grid-column: 1 / -1; }
+  .company-form-grid label { display:block; color: var(--muted); font-size:11.5px; margin-bottom:5px; }
+  .company-form-grid input, .company-form-grid textarea, .company-form-grid select { width:100%; border:1px solid var(--border); background:var(--panel2); color:var(--text); padding:10px; border-radius:8px; font:inherit; font-size:13px; }
+  .company-form-grid textarea { min-height:68px; resize:vertical; }
+  .company-modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  .new-research-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .new-research-btn:disabled:hover { border-color: var(--border); }
+  .history-search { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 12px; margin-bottom: 10px; flex-shrink: 0; }
+  .history-search:focus { outline: none; border-color: var(--accent); }
+  .history-search::placeholder { color: var(--muted); }
+  .history-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; padding: 0 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
+  .fav-filter-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 0; line-height: 1; }
+  .fav-filter-btn.active { color: var(--warn); }
+  .history-list { overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
+  .history-item-row { display: flex; align-items: center; gap: 4px; border-radius: 8px; padding: 2px; }
+  .history-item-row:hover { background: var(--panel); }
+  .history-item-row.active { background: var(--panel2); border: 1px solid var(--border); }
+  .fav-star { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 4px; flex-shrink: 0; line-height: 1; }
+  .fav-star.starred { color: var(--warn); }
+  .history-item { flex: 1; min-width: 0; padding: 7px 4px; font-size: 12.5px; color: var(--muted); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .history-item-row.active .history-item, .history-item-row:hover .history-item { color: var(--text); }
+  .history-more { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 4px 6px; flex-shrink: 0; line-height: 1; opacity: 0; transition: opacity 0.15s; }
+  .history-item-row:hover .history-more { opacity: 1; }
+  .history-more:hover { color: var(--text); }
+  .history-empty { font-size: 12px; color: var(--muted); padding: 4px; }
+  .guest-note { font-size: 11.5px; color: var(--muted); padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; line-height: 1.5; flex-shrink: 0; }
+  .guest-note a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+  .sidebar-toggle { position: fixed; top: 20px; left: 196px; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 50; transition: left 0.2s, color 0.2s, border-color 0.2s; }
+  .sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
+  .sidebar-toggle svg { width: 16px; height: 16px; stroke: currentColor; }
+  .sidebar-toggle.shifted { left: 14px; }
+  .main-area { flex: 1; height: 100vh; overflow-y: auto; padding: 40px 20px 20px; display: flex; flex-direction: column; min-width: 0; }
+  .wrap { max-width: 780px; margin: 0 auto; width: 100%; flex: 1; }
+  header { text-align: center; margin-bottom: 28px; }
+  header h1 { font-size: 28px; margin: 0 0 8px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .gradient-text { background: linear-gradient(90deg, #a5b4ff, #7c9cff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .logo-icon { position: relative; display: inline-flex; animation: breathe 2.8s ease-in-out infinite; }
+  .logo-icon svg { width: 34px; height: 34px; stroke: var(--accent); filter: drop-shadow(0 0 6px var(--accent-glow)); }
+  .ai-badge { position: absolute; bottom: -4px; right: -8px; background: linear-gradient(135deg, #7c9cff, #5b7cfa); color: white; font-size: 9px; font-weight: 800; letter-spacing: 0.5px; padding: 1px 5px; border-radius: 6px; border: 2px solid var(--bg); box-shadow: 0 0 8px var(--accent-glow); }
+  @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+  header p { color: var(--muted); margin: 0; font-size: 14px; }
+  .mode-toggle { display: flex; gap: 8px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .mode-btn { padding: 8px 16px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .mode-btn:hover { border-color: var(--accent); color: var(--text); }
+  .mode-btn.active { background: linear-gradient(135deg, #7c9cff, #5b7cfa); color: white; border-color: transparent; }
+  .research-setup { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 18px; margin-bottom: 14px; }
+  .setup-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .setup-heading h2 { margin: 0; font-size: 14px; color: var(--text); }
+  .setup-heading span { color: var(--muted); font-size: 11.5px; }
+  .setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .setup-field.full { grid-column: 1 / -1; }
+  .setup-field label { display: block; color: var(--muted); font-size: 11.5px; font-weight: 600; margin-bottom: 5px; }
+  .setup-field input, .setup-field select, .setup-field textarea { width: 100%; border: 1px solid var(--border); background: var(--panel2); color: var(--text); border-radius: 9px; padding: 10px 11px; font: inherit; font-size: 13px; }
+  .setup-field textarea { resize: vertical; min-height: 72px; line-height: 1.45; }
+  .setup-field input:focus, .setup-field select:focus, .setup-field textarea:focus { outline: none; border-color: var(--accent); }
+  .depth-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 18px; }
+  .depth-option { position: relative; cursor: pointer; }
+  .depth-option input { position: absolute; opacity: 0; pointer-events: none; }
+  .depth-card { display: block; height: 100%; border: 1px solid var(--border); border-radius: 11px; padding: 10px 12px; background: var(--panel); transition: all .2s; }
+  .depth-card strong { display: block; color: var(--text); font-size: 12.5px; margin-bottom: 3px; }
+  .depth-card small { color: var(--muted); font-size: 11px; line-height: 1.35; }
+  .depth-option input:checked + .depth-card { border-color: var(--accent); background: rgba(124,156,255,.09); box-shadow: 0 0 0 1px var(--accent-glow); }
+  .input-row { display: flex; gap: 10px; margin-bottom: 32px; align-items: center; }
+  .input-row textarea { flex: 1; resize: none; height: 54px; max-height: 160px; padding: 15px 16px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 14px; font-family: inherit; line-height: 1.4; overflow-y: auto; }
+  .input-row textarea:focus { outline: none; border-color: var(--accent); }
+  .input-row button.primary { padding: 0 22px; height: 54px; flex-shrink: 0; }
+  button.primary { border-radius: 12px; border: none; background: linear-gradient(135deg, #7c9cff, #5b7cfa); color: white; font-weight: 600; font-size: 14px; cursor: pointer; transition: transform 0.15s, opacity 0.15s; }
+  button.primary:hover { transform: translateY(-1px); }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .agents { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .agent-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 12px; text-align: center; transition: border-color 0.3s, box-shadow 0.3s, transform 0.15s; cursor: pointer; }
+  .agent-card:hover { transform: translateY(-2px); }
+  .agent-card .icon { margin-bottom: 8px; display: flex; justify-content: center; }
+  .agent-card .icon svg { width: 22px; height: 22px; stroke: var(--muted); transition: stroke 0.3s; }
+  .agent-card .name { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .agent-card .state { font-size: 11px; margin-top: 4px; color: var(--muted); }
+  .agent-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow), 0 0 24px var(--accent-glow); animation: pulse 1.4s ease-in-out infinite; }
+  .agent-card.active .icon svg { stroke: var(--accent); }
+  .agent-card.active .state { color: var(--accent); }
+  .agent-card.complete { border-color: var(--done); }
+  .agent-card.complete .icon svg { stroke: var(--done); }
+  .agent-card.complete .state { color: var(--done); }
+  .agent-card.error { border-color: var(--error); }
+  .agent-card.error .icon svg { stroke: var(--error); }
+  .agent-card.error .state { color: var(--error); }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 1px var(--accent-glow), 0 0 24px var(--accent-glow); } 50% { box-shadow: 0 0 0 1px var(--accent-glow), 0 0 40px var(--accent-glow); } }
+  #agentModalOverlay { display: none; position: fixed; inset: 0; background: rgba(5, 7, 12, 0.85); backdrop-filter: blur(6px); z-index: 90; align-items: center; justify-content: center; padding: 20px; }
+  #agentModalOverlay.visible { display: flex; }
+  .agent-modal { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; width: min(600px, 100%); max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
+  .agent-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .agent-modal-header h3 { margin: 0; font-size: 16px; color: var(--accent); }
+  .agent-modal-close { background: none; border: 1px solid var(--border); color: var(--muted); width: 28px; height: 28px; border-radius: 8px; cursor: pointer; font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+  .agent-modal-close:hover { color: var(--text); border-color: var(--muted); }
+  .agent-modal-body { padding: 20px; overflow-y: auto; font-size: 13.5px; line-height: 1.65; }
+  .agent-modal-body p { margin: 0 0 10px; }
+  .agent-modal-body strong { color: #fff; }
+  .agent-modal-body ul, .agent-modal-body ol { padding-left: 20px; margin: 10px 0; }
+  .agent-modal-body li { margin-bottom: 6px; }
+  .agent-modal-body a { color: var(--accent); }
+  .agent-modal-body table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12.5px; }
+  .agent-modal-body th, .agent-modal-body td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+  .agent-modal-body th { background: var(--panel2); color: var(--accent); }
+  #verdict-section { display: none; margin-bottom: 24px; }
+  .verdict-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+  .verdict-top { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .verdict-badge { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; padding: 6px 14px; border-radius: 999px; }
+  .verdict-badge.go { background: rgba(74, 222, 128, 0.15); color: var(--done); border: 1px solid var(--done); }
+  .verdict-badge.caution { background: rgba(251, 191, 36, 0.15); color: var(--warn); border: 1px solid var(--warn); }
+  .verdict-badge.nogo { background: rgba(248, 113, 113, 0.15); color: var(--error); border: 1px solid var(--error); }
+  .verdict-score-big { font-size: 22px; font-weight: 800; color: var(--text); }
+  .verdict-score-big span { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .verdict-bars { display: flex; flex-direction: column; gap: 12px; }
+  .verdict-bar-row { display: flex; align-items: center; gap: 10px; }
+  .verdict-bar-label { width: 150px; flex-shrink: 0; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .verdict-bar-track { flex: 1; height: 8px; border-radius: 6px; background: var(--panel2); overflow: hidden; }
+  .verdict-bar-fill { height: 100%; border-radius: 6px; background: linear-gradient(90deg, #7c9cff, #5b7cfa); width: 0%; transition: width 0.8s ease-out; }
+  .verdict-bar-value { width: 40px; flex-shrink: 0; font-size: 12px; color: var(--text); font-weight: 700; text-align: right; }
+  .verdict-risk { margin-top: 14px; font-size: 12.5px; color: var(--muted); }
+  .verdict-risk strong { color: var(--text); }
+  .venture-score-block { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .venture-score-title { font-size: 13px; font-weight: 700; color: var(--accent); margin-bottom: 14px; }
+  .venture-score-phrase { margin-top: 14px; font-size: 13px; color: var(--text); font-weight: 600; }
+  #opportunity-section { display: none; margin-bottom: 24px; }
+  .opportunity-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+  .opportunity-card h3 { margin: 0 0 16px; font-size: 16px; color: var(--accent); }
+  .opportunity-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .opportunity-table th { text-align: left; padding: 8px 10px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid var(--border); }
+  .opportunity-table td { padding: 12px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .opportunity-table tr:last-child td { border-bottom: none; }
+  .opp-name { font-weight: 600; color: var(--text); }
+  .opp-market { color: var(--muted); font-size: 12.5px; }
+  .diff-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; display: inline-block; }
+  .diff-badge.low { background: rgba(74, 222, 128, 0.15); color: var(--done); }
+  .diff-badge.medium { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+  .diff-badge.high { background: rgba(248, 113, 113, 0.15); color: var(--error); }
+  .opp-potential { display: flex; align-items: center; gap: 8px; min-width: 90px; }
+  .opp-potential-track { flex: 1; height: 6px; border-radius: 4px; background: var(--panel2); overflow: hidden; }
+  .opp-potential-fill { height: 100%; background: linear-gradient(90deg, #7c9cff, #5b7cfa); border-radius: 4px; }
+  .opp-potential-value { font-size: 11.5px; color: var(--muted); font-weight: 700; width: 30px; text-align: right; }
+  .opp-research-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: border-color 0.2s; }
+  .opp-research-btn:hover { border-color: var(--accent); }
+  #report-section { display: none; margin-bottom: 24px; }
+  #charts-section { display: none; margin-bottom: 24px; }
+  .charts-heading { margin: 0 0 12px; font-size: 16px; color: var(--accent); }
+  .charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .chart-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; min-height: 280px; }
+  .chart-card.wide { grid-column: 1 / -1; }
+  .chart-title { font-size: 12.5px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+  .chart-wrap { position: relative; height: 230px; }
+  #sources-section { display: none; margin-bottom: 24px; }
+  .sources-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
+  .sources-card h2 { margin: 0 0 6px; color: var(--accent); font-size: 16px; }
+  .sources-subtitle { color: var(--muted); font-size: 12px; margin-bottom: 15px; }
+  .sources-list { display: grid; gap: 8px; }
+  .source-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 11px; background: var(--panel2); border-radius: 10px; }
+  .source-number { color: var(--muted); font-size: 11px; font-weight: 700; }
+  .source-link { color: var(--text); text-decoration: none; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .source-link:hover { color: var(--accent); }
+  .source-quality { font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 3px 8px; white-space: nowrap; }
+  .source-quality.official { color: var(--done); background: rgba(74,222,128,.12); }
+  .source-quality.company { color: var(--accent); background: rgba(124,156,255,.12); }
+  .source-quality.industry { color: var(--warn); background: rgba(251,191,36,.12); }
+  .source-quality.news { color: var(--muted); background: rgba(122,131,153,.12); }
+  .report-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 28px; line-height: 1.7; font-size: 14.5px; }
+  .report-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .export-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+  .report-card h2 { margin: 0; font-size: 18px; color: var(--accent); }
+  .export-pdf-btn { display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: color 0.2s, border-color 0.2s; flex-shrink: 0; }
+  .export-pdf-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .export-pdf-btn svg { width: 14px; height: 14px; stroke: currentColor; }
+  .report-card h3 { font-size: 15px; color: var(--accent); margin-top: 24px; margin-bottom: 8px; }
+  .report-card strong { color: #fff; font-weight: 600; }
+  .report-card ul, .report-card ol { padding-left: 20px; margin: 10px 0; }
+  .report-card li { margin-bottom: 6px; }
+  .report-card p { margin: 10px 0; }
+  .report-card hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+  .report-card table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px; }
+  .report-card th, .report-card td { border: 1px solid var(--border); padding: 10px 12px; text-align: left; vertical-align: top; }
+  .report-card th { background: var(--panel2); color: var(--accent); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .report-card td { color: var(--text); }
+  #followup-section { display: none; margin-bottom: 24px; }
+  .followup-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+  .followup-card h3 { margin: 0 0 14px; font-size: 14px; color: var(--muted); font-weight: 700; }
+  .followup-messages { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; max-height: 320px; overflow-y: auto; }
+  .followup-msg { padding: 10px 13px; border-radius: 10px; font-size: 13.5px; line-height: 1.5; max-width: 85%; }
+  .followup-msg p { margin: 0 0 8px; }
+  .followup-msg p:last-child { margin-bottom: 0; }
+  .followup-msg strong { color: inherit; font-weight: 700; }
+  .followup-msg ul, .followup-msg ol { margin: 8px 0; padding-left: 18px; }
+  .followup-msg li { margin-bottom: 4px; }
+  .followup-msg.user { align-self: flex-end; background: linear-gradient(135deg, #7c9cff, #5b7cfa); color: white; }
+  .followup-msg.assistant { align-self: flex-start; background: var(--panel2); border: 1px solid var(--border); }
+  .followup-input-row { display: flex; gap: 8px; align-items: flex-end; }
+  .followup-input-row textarea { flex: 1; resize: none; height: 44px; max-height: 100px; padding: 11px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 13px; font-family: inherit; line-height: 1.4; overflow-y: auto; }
+  .followup-input-row textarea:focus { outline: none; border-color: var(--accent); }
+  .followup-input-row button.primary { height: 44px; padding: 0 18px; font-size: 13px; flex-shrink: 0; width: auto; }
+  .hint { text-align: center; color: var(--muted); font-size: 13px; margin-top: 4px; margin-bottom: 20px; }
+  .footer { text-align: center; color: var(--muted); font-size: 12px; font-weight: 600; padding-top: 24px; margin-top: auto; }
+  @media (max-width: 760px) {
+    .charts-grid { grid-template-columns: 1fr; }
+    .chart-card.wide { grid-column: auto; }
+    .source-row { grid-template-columns: 24px minmax(0, 1fr); }
+    .source-quality { grid-column: 2; justify-self: start; }
+    .setup-grid { grid-template-columns: 1fr; }
+    .company-form-grid { grid-template-columns: 1fr; }
+    .company-form-grid .full { grid-column:auto; }
+    .setup-field.full { grid-column: auto; }
+    .depth-selector { grid-template-columns: 1fr; }
+    .sidebar { position: fixed; top: 0; left: 0; z-index: 40; background: var(--bg); box-shadow: 4px 0 24px rgba(0,0,0,0.5); width: min(240px, 78vw); }
+    .sidebar.collapsed { width: 0; box-shadow: none; }
+    .sidebar-toggle.shifted { left: 14px; }
+    .main-area { padding: 66px 14px 16px; }
+    header { margin-bottom: 20px; }
+    header h1 { font-size: 20px; gap: 7px; }
+    .logo-icon svg { width: 26px; height: 26px; }
+    .ai-badge { font-size: 7px; padding: 1px 4px; }
+    header p { font-size: 12px; }
+    .mode-toggle { margin-bottom: 16px; }
+    .mode-btn { font-size: 11.5px; padding: 7px 12px; }
+    .input-row { margin-bottom: 20px; }
+    .input-row textarea { font-size: 13px; padding: 12px 14px; }
+    .input-row button.primary { padding: 0 16px; font-size: 13px; }
+    .agents { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .agent-card { padding: 12px 8px; }
+    .agent-card .icon svg { width: 18px; height: 18px; }
+    .agent-card .name { font-size: 11px; }
+    .agent-card .state { font-size: 10px; }
+    .report-card { padding: 18px; font-size: 13.5px; }
+    .report-card h2 { font-size: 16px; }
+    .report-card table { font-size: 12px; }
+    .report-card th, .report-card td { padding: 7px 8px; }
+    .report-card-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+    .export-pdf-btn { align-self: stretch; justify-content: center; }
+    .followup-card { padding: 14px; }
+    .followup-msg { max-width: 92%; font-size: 13px; }
+    .auth-card { padding: 24px; }
+    .verdict-card { padding: 18px; }
+    .verdict-bar-label { width: 110px; font-size: 11.5px; }
+    .history-more { opacity: 1; }
+    .opportunity-card { padding: 16px; }
+    .opportunity-table { font-size: 12px; }
+    .opportunity-table th:nth-child(2), .opportunity-table td:nth-child(2) { display: none; }
+    .opp-potential { min-width: 60px; }
+    .opp-research-btn { padding: 5px 8px; font-size: 11px; }
+  }
+  @media (max-width: 420px) {
+    .input-row { flex-direction: column; align-items: stretch; }
+    .input-row button.primary { width: 100%; height: 46px; }
+    .input-row textarea { height: 48px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+<button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2"/>
+    <line x1="9" y1="3" x2="9" y2="21"/>
+  </svg>
+</button>
+
+<div id="authOverlay">
+  <div class="auth-card">
+    <h2 id="authTitle">Welcome back</h2>
+    <p class="sub" id="authSub">Log in to continue your research</p>
+    <div class="auth-field"><label>Email</label><input type="email" id="authEmail" placeholder="you@example.com" /></div>
+    <div class="auth-field"><label>Password</label><input type="password" id="authPassword" placeholder="••••••••" /></div>
+    <div class="auth-field" id="confirmPasswordField" style="display:none;"><label>Confirm Password</label><input type="password" id="authConfirmPassword" placeholder="••••••••" /></div>
+    <button class="auth-submit" id="authSubmitBtn">Log In</button>
+    <div class="auth-error" id="authError"></div>
+    <div class="auth-toggle" id="authToggle">Don't have an account? <a id="authToggleLink">Sign up</a></div>
+    <div class="auth-skip"><a id="skipLoginLink">Continue without signing in</a></div>
+  </div>
+</div>
+
+<div id="agentModalOverlay">
+  <div class="agent-modal">
+    <div class="agent-modal-header">
+      <h3 id="agentModalTitle">Agent Output</h3>
+      <button class="agent-modal-close" id="agentModalClose">&times;</button>
+    </div>
+    <div class="agent-modal-body" id="agentModalBody"></div>
+  </div>
+</div>
+
+<div id="companyModalOverlay">
+  <div class="company-modal">
+    <h2>Company Profile</h2>
+    <p>Saved privately to your account and used only when you enable it for research.</p>
+    <div class="company-form-grid">
+      <div><label>Company name *</label><input id="companyName" placeholder="ABC Restaurant Group"></div>
+      <div><label>Industry</label><input id="companyIndustry" placeholder="Food & Beverage"></div>
+      <div><label>Country / market</label><input id="companyCountry" placeholder="Malaysia"></div>
+      <div><label>Currency</label><input id="companyCurrency" value="MYR" placeholder="MYR"></div>
+      <div class="full"><label>Products or services</label><textarea id="companyProducts" placeholder="What does your company sell or provide?"></textarea></div>
+      <div><label>Target customers</label><textarea id="companyCustomers" placeholder="Who do you serve?"></textarea></div>
+      <div><label>Main competitors</label><textarea id="companyCompetitors" placeholder="Competitor names, if known"></textarea></div>
+      <div><label>Monthly budget</label><input id="companyBudget" placeholder="RM20,000"></div>
+      <div><label>Business stage</label><select id="companyStage"><option>Idea</option><option>Startup</option><option selected>Existing business</option></select></div>
+      <div class="full"><label>Business goals</label><textarea id="companyGoals" placeholder="Grow sales, improve margins, open a new branch..."></textarea></div>
+    </div>
+    <div class="company-modal-actions"><button class="export-pdf-btn" id="companyCancelBtn">Cancel</button><button class="primary" id="companySaveBtn" style="padding:10px 15px;">Save Profile</button></div>
+  </div>
+</div>
+
+<div class="app-layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand-name">VentureCore AI</div>
+      <div class="sidebar-user" id="sidebarUserBlock">
+        <span class="email" id="userEmail">-</span>
+        <button class="logout-btn" id="logoutBtn">Log out</button>
+      </div>
+      <button class="new-research-btn" id="newResearchBtn">+ New Research</button>
+      <button class="company-btn" id="companyProfileBtn">My Company</button>
+      <input type="text" class="history-search" id="historySearch" placeholder="Search research...">
+      <div class="history-label">
+        <span>History</span>
+        <button class="fav-filter-btn" id="favFilterBtn" title="Show favorites only">★</button>
+      </div>
+      <div class="history-list" id="historyList"><div class="history-empty">No research yet.</div></div>
+      <div class="guest-note" id="guestNote" style="display:none;">Browsing as guest. <a id="guestLoginLink">Log in</a> to save your research history.</div>
+    </div>
+  </aside>
+
+  <main class="main-area">
+    <div class="wrap">
+      <header>
+        <h1>
+          <span class="logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+              <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+              <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+              <path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/>
+              <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/>
+              <path d="M3.477 10.896a4 4 0 0 1 .585-.396"/>
+              <path d="M19.938 10.5a4 4 0 0 1 .585.396"/>
+              <path d="M6 18a4 4 0 0 1-1.967-.516"/>
+              <path d="M19.967 17.484A4 4 0 0 1 18 18"/>
+            </svg>
+            <span class="ai-badge">AI</span>
+          </span>
+          <span class="gradient-text">Business Research Agents</span>
+        </h1>
+        <p>4 specialist AI agents research your idea, orchestrated automatically behind the scenes</p>
+      </header>
+
+      <div class="mode-toggle">
+        <button class="mode-btn active" data-mode="market">Research a Market</button>
+        <button class="mode-btn" data-mode="validate">Validate an Idea</button>
+        <button class="mode-btn" data-mode="opportunities">Find Opportunities</button>
+      </div>
+
+      <section class="research-setup" id="researchSetup">
+        <div class="setup-heading"><h2>Research setup</h2><span>Give the agents precise context</span></div>
+        <div class="setup-grid">
+          <div class="setup-field full"><label for="businessIdea">Company or business idea *</label><input id="businessIdea" maxlength="180" placeholder="AI-powered restaurant ordering system"></div>
+          <div class="setup-field"><label for="industry">Industry *</label><input id="industry" maxlength="100" placeholder="Food technology"></div>
+          <div class="setup-field"><label for="targetMarket">Target country or market *</label><input id="targetMarket" maxlength="100" placeholder="Malaysia"></div>
+          <div class="setup-field"><label for="targetCustomers">Target customers</label><input id="targetCustomers" maxlength="160" placeholder="Independent restaurants and café chains"></div>
+          <div class="setup-field"><label for="businessStage">Business stage</label><select id="businessStage"><option>Idea</option><option>Startup</option><option>Existing business</option></select></div>
+          <div class="setup-field"><label for="budget">Budget or investment amount</label><input id="budget" maxlength="80" placeholder="RM100,000"></div>
+          <div class="setup-field full"><label for="researchObjective">Research objective *</label><textarea id="researchObjective" maxlength="300" placeholder="Determine whether launching this business is commercially viable."></textarea></div>
+        </div>
+      </section>
+
+      <div class="depth-selector" id="depthSelector" aria-label="Research depth">
+        <label class="depth-option"><input type="radio" name="researchDepth" value="quick"><span class="depth-card"><strong>Quick Scan</strong><small>Fast overview and directional verdict</small></span></label>
+        <label class="depth-option"><input type="radio" name="researchDepth" value="standard" checked><span class="depth-card"><strong>Standard Research</strong><small>Market, competitors and financials</small></span></label>
+        <label class="depth-option"><input type="radio" name="researchDepth" value="deep"><span class="depth-card"><strong>Deep Research</strong><small>Sources, modelling and strategy</small></span></label>
+      </div>
+      <label class="company-use" id="companyUseRow" style="display:none;"><input type="checkbox" id="useCompanyProfile"> Use my saved company profile for this research</label>
+
+      <div class="input-row">
+        <textarea id="question" placeholder="Optional: add a specific question or constraint for the agents"></textarea>
+        <button class="primary" id="submitBtn">Research</button>
+      </div>
+
+      <div class="agents" id="agentsGrid">
+        <div class="agent-card" data-stage="market_research">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></div>
+          <div class="name">Market Research</div>
+          <div class="state">Idle</div>
+        </div>
+        <div class="agent-card" data-stage="competitor_analysis">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg></div>
+          <div class="name">Competitor</div>
+          <div class="state">Idle</div>
+        </div>
+        <div class="agent-card" data-stage="financial_analysis">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+          <div class="name">Financial</div>
+          <div class="state">Idle</div>
+        </div>
+        <div class="agent-card" data-stage="synthesis">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"/></svg></div>
+          <div class="name">Synthesis</div>
+          <div class="state">Idle</div>
+        </div>
+      </div>
+
+      <div class="hint" id="hint">Enter a business question above to begin.</div>
+
+      <div id="opportunity-section">
+        <div class="opportunity-card">
+          <h3>Top Opportunities Found</h3>
+          <table class="opportunity-table">
+            <thead><tr><th>Opportunity</th><th>Market</th><th>Difficulty</th><th>Potential</th><th></th></tr></thead>
+            <tbody id="opportunityTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="verdict-section"><div class="verdict-card" id="verdictCard"></div></div>
+
+      <section id="charts-section">
+        <h2 class="charts-heading">Research Analytics</h2>
+        <div class="charts-grid">
+          <div class="chart-card" id="marketChartCard"><div class="chart-title">Market Growth Forecast</div><div class="chart-wrap"><canvas id="marketChart"></canvas></div></div>
+          <div class="chart-card" id="competitorChartCard"><div class="chart-title">Competitor Positioning</div><div class="chart-wrap"><canvas id="competitorChart"></canvas></div></div>
+          <div class="chart-card wide" id="financialChartCard"><div class="chart-title">12-Month Revenue vs Expenses</div><div class="chart-wrap"><canvas id="financialChart"></canvas></div></div>
+        </div>
+      </section>
+
+      <section id="sources-section">
+        <div class="sources-card">
+          <h2>Sources & Evidence</h2>
+          <div class="sources-subtitle" id="sourcesSubtitle"></div>
+          <div class="sources-list" id="sourcesList"></div>
+        </div>
+      </section>
+
+      <div id="report-section">
+        <div class="report-card">
+          <div class="report-card-header">
+            <h2>Final Report</h2>
+            <div class="export-actions">
+            <button class="export-pdf-btn" id="exportPdfBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              PDF
+            </button>
+            <button class="export-pdf-btn" id="exportDocxBtn">Word</button>
+            <button class="export-pdf-btn" id="exportXlsxBtn">Excel</button>
+            </div>
+          </div>
+          <div id="report-text"></div>
+        </div>
+      </div>
+
+      <div id="followup-section">
+        <div class="followup-card">
+          <h3>Ask a follow-up question</h3>
+          <div class="followup-messages" id="followupMessages"></div>
+          <div class="followup-input-row">
+            <textarea id="followupInput" placeholder="Ask something about this report..."></textarea>
+            <button class="primary" id="followupSendBtn">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="footer">Created by Qazi Tanzimul Islam</div>
+  </main>
+</div>
+
+<script>
+let currentJobId = null;
+let authMode = "login";
+let isGuest = false;
+let isResearching = false;
+let currentSections = {};
+let favFilterActive = false;
+let searchDebounceTimer = null;
+let selectedResearchMode = "market";
+
+const authOverlay = document.getElementById("authOverlay");
+const authTitle = document.getElementById("authTitle");
+const authSub = document.getElementById("authSub");
+const authEmail = document.getElementById("authEmail");
+const authPassword = document.getElementById("authPassword");
+const authSubmitBtn = document.getElementById("authSubmitBtn");
+const authError = document.getElementById("authError");
+const authToggleText = document.getElementById("authToggle");
+const skipLoginLink = document.getElementById("skipLoginLink");
+const sidebar = document.getElementById("sidebar");
+const sidebarToggle = document.getElementById("sidebarToggle");
+const sidebarBackdrop = document.getElementById("sidebarBackdrop");
+const sidebarUserBlock = document.getElementById("sidebarUserBlock");
+const guestNote = document.getElementById("guestNote");
+const guestLoginLink = document.getElementById("guestLoginLink");
+const userEmailEl = document.getElementById("userEmail");
+const logoutBtn = document.getElementById("logoutBtn");
+const newResearchBtn = document.getElementById("newResearchBtn");
+const companyProfileBtn = document.getElementById("companyProfileBtn");
+const companyModalOverlay = document.getElementById("companyModalOverlay");
+const companyUseRow = document.getElementById("companyUseRow");
+const useCompanyProfile = document.getElementById("useCompanyProfile");
+const companySaveBtn = document.getElementById("companySaveBtn");
+const companyCancelBtn = document.getElementById("companyCancelBtn");
+const historyList = document.getElementById("historyList");
+const historySearch = document.getElementById("historySearch");
+const favFilterBtn = document.getElementById("favFilterBtn");
+
+const companyFields = {
+  company_name: document.getElementById("companyName"), industry: document.getElementById("companyIndustry"),
+  country: document.getElementById("companyCountry"), currency: document.getElementById("companyCurrency"),
+  products_services: document.getElementById("companyProducts"), target_customers: document.getElementById("companyCustomers"),
+  main_competitors: document.getElementById("companyCompetitors"), monthly_budget: document.getElementById("companyBudget"),
+  business_goals: document.getElementById("companyGoals"), business_stage: document.getElementById("companyStage")
+};
+
+const STAGE_ORDER = ["market_research", "competitor_analysis", "financial_analysis", "synthesis"];
+const STAGE_LABELS = { market_research: "Market Research", competitor_analysis: "Competitor Analysis", financial_analysis: "Financial Analysis", synthesis: "Synthesis" };
+const STAGE_ACTIVITY = {
+  market_research: "Searching market data...",
+  competitor_analysis: "Comparing competitors...",
+  financial_analysis: "Building projections...",
+  synthesis: "Combining findings..."
+};
+const cards = {};
+document.querySelectorAll(".agent-card").forEach(c => cards[c.dataset.stage] = c);
+
+const questionEl = document.getElementById("question");
+const researchSetup = document.getElementById("researchSetup");
+const depthSelector = document.getElementById("depthSelector");
+const businessIdeaEl = document.getElementById("businessIdea");
+const industryEl = document.getElementById("industry");
+const targetMarketEl = document.getElementById("targetMarket");
+const targetCustomersEl = document.getElementById("targetCustomers");
+const businessStageEl = document.getElementById("businessStage");
+const budgetEl = document.getElementById("budget");
+const researchObjectiveEl = document.getElementById("researchObjective");
+const submitBtn = document.getElementById("submitBtn");
+const hint = document.getElementById("hint");
+const agentsGrid = document.getElementById("agentsGrid");
+const reportSection = document.getElementById("report-section");
+const reportText = document.getElementById("report-text");
+const chartsSection = document.getElementById("charts-section");
+const marketChartCard = document.getElementById("marketChartCard");
+const competitorChartCard = document.getElementById("competitorChartCard");
+const financialChartCard = document.getElementById("financialChartCard");
+const sourcesSection = document.getElementById("sources-section");
+const sourcesSubtitle = document.getElementById("sourcesSubtitle");
+const sourcesList = document.getElementById("sourcesList");
+let marketChartInstance = null;
+let competitorChartInstance = null;
+let financialChartInstance = null;
+const verdictSection = document.getElementById("verdict-section");
+const verdictCard = document.getElementById("verdictCard");
+const exportPdfBtn = document.getElementById("exportPdfBtn");
+const exportDocxBtn = document.getElementById("exportDocxBtn");
+const exportXlsxBtn = document.getElementById("exportXlsxBtn");
+const opportunitySection = document.getElementById("opportunity-section");
+const opportunityTableBody = document.getElementById("opportunityTableBody");
+const followupSection = document.getElementById("followup-section");
+const followupMessages = document.getElementById("followupMessages");
+const followupInput = document.getElementById("followupInput");
+const followupSendBtn = document.getElementById("followupSendBtn");
+const agentModalOverlay = document.getElementById("agentModalOverlay");
+const agentModalTitle = document.getElementById("agentModalTitle");
+const agentModalBody = document.getElementById("agentModalBody");
+const agentModalClose = document.getElementById("agentModalClose");
+
+const MOBILE_BREAKPOINT = 760;
+function isMobile() { return window.innerWidth <= MOBILE_BREAKPOINT; }
+
+function setSidebarOpen(open) {
+  if (open) {
+    sidebar.classList.remove("collapsed");
+    sidebarToggle.classList.remove("shifted");
+    if (isMobile()) sidebarBackdrop.classList.add("visible");
+  } else {
+    sidebar.classList.add("collapsed");
+    sidebarToggle.classList.add("shifted");
+    sidebarBackdrop.classList.remove("visible");
+  }
+}
+setSidebarOpen(!isMobile());
+sidebarToggle.addEventListener("click", () => setSidebarOpen(sidebar.classList.contains("collapsed")));
+sidebarBackdrop.addEventListener("click", () => setSidebarOpen(false));
+window.addEventListener("resize", () => { if (!isMobile() && sidebarBackdrop.classList.contains("visible")) sidebarBackdrop.classList.remove("visible"); });
+
+function updateModeUI() {
+  if (selectedResearchMode === "opportunities") {
+    questionEl.placeholder = "e.g. I want to start an AI business in Malaysia";
+    submitBtn.textContent = "Find Opportunities";
+    agentsGrid.style.display = "none";
+    researchSetup.style.display = "none";
+    depthSelector.style.display = "none";
+  } else if (selectedResearchMode === "validate") {
+    questionEl.placeholder = "Optional: add a specific validation question or constraint";
+    submitBtn.textContent = "Validate Idea";
+    agentsGrid.style.display = "grid";
+    researchSetup.style.display = "block";
+    depthSelector.style.display = "grid";
+  } else {
+    questionEl.placeholder = "Optional: add a specific question or constraint for the agents";
+    submitBtn.textContent = "Run Research";
+    agentsGrid.style.display = "grid";
+    researchSetup.style.display = "block";
+    depthSelector.style.display = "grid";
+  }
+}
+
+async function openCompanyProfile() {
+  if (isGuest) { authOverlay.style.display = "flex"; return; }
+  const res = await fetch("/company/profile");
+  if (res.ok) {
+    const profile = await res.json();
+    if (profile) Object.entries(companyFields).forEach(([key, field]) => { field.value = profile[key] || ""; });
+  }
+  companyModalOverlay.classList.add("visible");
+}
+
+companyProfileBtn.addEventListener("click", openCompanyProfile);
+companyCancelBtn.addEventListener("click", () => companyModalOverlay.classList.remove("visible"));
+companyModalOverlay.addEventListener("click", event => { if (event.target === companyModalOverlay) companyModalOverlay.classList.remove("visible"); });
+companySaveBtn.addEventListener("click", async () => {
+  const payload = Object.fromEntries(Object.entries(companyFields).map(([key, field]) => [key, field.value.trim()]));
+  if (!payload.company_name) { alert("Please enter your company name."); return; }
+  companySaveBtn.disabled = true;
+  const res = await fetch("/company/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  companySaveBtn.disabled = false;
+  if (!res.ok) { alert("Could not save your company profile."); return; }
+  companyModalOverlay.classList.remove("visible");
+  companyUseRow.style.display = "flex";
+  useCompanyProfile.checked = true;
+});
+
+function buildResearchBrief() {
+  const fields = [
+    ["Business", businessIdeaEl.value.trim()],
+    ["Industry", industryEl.value.trim()],
+    ["Target market", targetMarketEl.value.trim()],
+    ["Target customers", targetCustomersEl.value.trim()],
+    ["Business stage", businessStageEl.value],
+    ["Budget / investment", budgetEl.value.trim()],
+    ["Research objective", researchObjectiveEl.value.trim()],
+    ["Specific question / constraints", questionEl.value.trim()],
+  ];
+  return fields.filter(([, value]) => value).map(([label, value]) => label + ": " + value).join("\n");
+}
+
+document.querySelectorAll(".mode-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    selectedResearchMode = btn.dataset.mode;
+    updateModeUI();
+  });
+});
+
+historySearch.addEventListener("input", () => {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => loadHistory(), 300);
+});
+
+favFilterBtn.addEventListener("click", () => {
+  favFilterActive = !favFilterActive;
+  favFilterBtn.classList.toggle("active", favFilterActive);
+  loadHistory();
+});
+
+exportPdfBtn.addEventListener("click", () => {
+  if (!currentJobId) return;
+  window.open("/research/job/" + currentJobId + "/pdf", "_blank");
+});
+exportDocxBtn.addEventListener("click", () => { if (currentJobId) window.open("/research/job/" + currentJobId + "/docx", "_blank"); });
+exportXlsxBtn.addEventListener("click", () => { if (currentJobId) window.open("/research/job/" + currentJobId + "/xlsx", "_blank"); });
+
+Object.keys(cards).forEach(stage => {
+  cards[stage].addEventListener("click", () => {
+    if (stage === "synthesis") {
+      if (reportSection.style.display === "block") reportSection.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    const content = currentSections[stage];
+    if (!content) return;
+    agentModalTitle.textContent = STAGE_LABELS[stage];
+    agentModalBody.innerHTML = marked.parse(cleanReportText(content));
+    agentModalOverlay.classList.add("visible");
+  });
+});
+agentModalClose.addEventListener("click", () => agentModalOverlay.classList.remove("visible"));
+agentModalOverlay.addEventListener("click", (e) => { if (e.target === agentModalOverlay) agentModalOverlay.classList.remove("visible"); });
+
+function parseVerdict(text) {
+  const oppMatch = text.match(/Opportunity Score:\s*(\d+)\s*\/\s*100/i);
+  const marketMatch = text.match(/Market Attractiveness:\s*([\d.]+)\s*\/\s*10/i);
+  const compMatch = text.match(/Competition Level:\s*([\d.]+)\s*\/\s*10/i);
+  const finMatch = text.match(/Financial Feasibility:\s*([\d.]+)\s*\/\s*10/i);
+  const riskMatch = text.match(/Overall Risk:\s*(Low|Medium|High)/i);
+  const verdictSectionMatch = text.match(/Verdict:?[\s\S]{0,40}?\b(GO|CAUTION|NO-GO)\b/i);
+  if (!oppMatch && !verdictSectionMatch) return null;
+  return {
+    verdict: verdictSectionMatch ? verdictSectionMatch[1].toUpperCase() : null,
+    opportunity: oppMatch ? parseInt(oppMatch[1]) : null,
+    market: marketMatch ? parseFloat(marketMatch[1]) : null,
+    competition: compMatch ? parseFloat(compMatch[1]) : null,
+    financial: finMatch ? parseFloat(finMatch[1]) : null,
+    risk: riskMatch ? riskMatch[1] : null,
+  };
+}
+
+function parseVentureScore(text) {
+  const idx = text.search(/\*\*Venture Score:?\*\*/i);
+  if (idx === -1) return null;
+  const block = text.slice(idx);
+  const demand = block.match(/Demand:\s*([\d.]+)\s*\/\s*10/i);
+  const competition = block.match(/Competition:\s*([\d.]+)\s*\/\s*10/i);
+  const profitability = block.match(/Profitability:\s*([\d.]+)\s*\/\s*10/i);
+  const scalability = block.match(/Scalability:\s*([\d.]+)\s*\/\s*10/i);
+  const risk = block.match(/Risk:\s*([\d.]+)\s*\/\s*10/i);
+  if (!demand && !competition && !profitability && !scalability && !risk) return null;
+  const afterRisk = block.slice(risk ? risk.index + risk[0].length : 0);
+  const phraseMatch = afterRisk.match(/\*\*([^*\n]{5,150})\*\*/);
+  return {
+    demand: demand ? parseFloat(demand[1]) : null,
+    competition: competition ? parseFloat(competition[1]) : null,
+    profitability: profitability ? parseFloat(profitability[1]) : null,
+    scalability: scalability ? parseFloat(scalability[1]) : null,
+    risk: risk ? parseFloat(risk[1]) : null,
+    phrase: phraseMatch ? phraseMatch[1].trim() : null,
+  };
+}
+
+function renderVerdictCard(text) {
+  const v = parseVerdict(text);
+  const vs = parseVentureScore(text);
+  if (!v && !vs) { verdictSection.style.display = "none"; return; }
+  let html = "";
+  if (v) {
+    let badgeClass = "caution";
+    if (v.verdict === "GO") badgeClass = "go"; else if (v.verdict === "NO-GO") badgeClass = "nogo";
+    const bars = [];
+    if (v.market !== null) bars.push({ label: "Market Attractiveness", value: v.market, max: 10 });
+    if (v.competition !== null) bars.push({ label: "Competition Level", value: v.competition, max: 10 });
+    if (v.financial !== null) bars.push({ label: "Financial Feasibility", value: v.financial, max: 10 });
+    html += '<div class="verdict-top">';
+    if (v.verdict) html += '<span class="verdict-badge ' + badgeClass + '">' + v.verdict + '</span>';
+    if (v.opportunity !== null) html += '<span class="verdict-score-big">' + v.opportunity + '<span>/100 Opportunity Score</span></span>';
+    html += '</div>';
+    if (bars.length > 0) {
+      html += '<div class="verdict-bars">';
+      bars.forEach(bar => {
+        const pct = (bar.value / bar.max) * 100;
+        html += '<div class="verdict-bar-row"><div class="verdict-bar-label">' + bar.label + '</div><div class="verdict-bar-track"><div class="verdict-bar-fill" style="width:0%" data-target="' + pct + '"></div></div><div class="verdict-bar-value">' + bar.value + '/' + bar.max + '</div></div>';
+      });
+      html += '</div>';
+    }
+    if (v.risk) html += '<div class="verdict-risk">Overall Risk: <strong>' + v.risk + '</strong></div>';
+  }
+  if (vs) {
+    const vsBars = [];
+    if (vs.demand !== null) vsBars.push({ label: "Demand", value: vs.demand });
+    if (vs.competition !== null) vsBars.push({ label: "Competition", value: vs.competition });
+    if (vs.profitability !== null) vsBars.push({ label: "Profitability", value: vs.profitability });
+    if (vs.scalability !== null) vsBars.push({ label: "Scalability", value: vs.scalability });
+    if (vs.risk !== null) vsBars.push({ label: "Risk", value: vs.risk });
+    html += '<div class="venture-score-block"><div class="venture-score-title">Venture Score</div><div class="verdict-bars">';
+    vsBars.forEach(bar => {
+      const pct = (bar.value / 10) * 100;
+      html += '<div class="verdict-bar-row"><div class="verdict-bar-label">' + bar.label + '</div><div class="verdict-bar-track"><div class="verdict-bar-fill" style="width:0%" data-target="' + pct + '"></div></div><div class="verdict-bar-value">' + bar.value + '/10</div></div>';
+    });
+    html += '</div>';
+    if (vs.phrase) html += '<div class="venture-score-phrase">' + vs.phrase + '</div>';
+    html += '</div>';
+  }
+  verdictCard.innerHTML = html;
+  verdictSection.style.display = "block";
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      verdictCard.querySelectorAll(".verdict-bar-fill").forEach(el => { el.style.width = el.dataset.target + "%"; });
+    }, 50);
+  });
+}
+
+function extractChartData(text, marker) {
+  if (!text) return null;
+  const line = text.split("\n").find(item => item.trim().startsWith(marker + ":"));
+  if (!line) return null;
+  try { return JSON.parse(line.slice(line.indexOf(":") + 1).trim()); }
+  catch (error) { console.warn("Invalid chart data for", marker); return null; }
+}
+
+function cleanReportText(text) {
+  return (text || "")
+    .replace(/^\s*(MARKET|COMPETITOR|FINANCIAL)_CHART_DATA:[^\n]*(?:\n(?!\s*(?:\*\*Sources|Sources:|---|\*\*[A-Za-z]))[^\n]*)*/gmi, "")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+function chartOptions(yTitle) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: "#aeb6c8", boxWidth: 12 } } },
+    scales: {
+      x: { ticks: { color: "#7a8399" }, grid: { color: "rgba(122,131,153,.12)" } },
+      y: { beginAtZero: true, title: { display: !!yTitle, text: yTitle || "", color: "#7a8399" }, ticks: { color: "#7a8399" }, grid: { color: "rgba(122,131,153,.12)" } }
+    }
+  };
+}
+
+function renderResearchCharts(sections) {
+  if (typeof Chart === "undefined") { chartsSection.style.display = "none"; return; }
+  [marketChartInstance, competitorChartInstance, financialChartInstance].forEach(chart => { if (chart) chart.destroy(); });
+  marketChartInstance = competitorChartInstance = financialChartInstance = null;
+  const market = extractChartData(sections.market_research, "MARKET_CHART_DATA");
+  const competitor = extractChartData(sections.competitor_analysis, "COMPETITOR_CHART_DATA");
+  const financial = extractChartData(sections.financial_analysis, "FINANCIAL_CHART_DATA");
+  marketChartCard.style.display = market ? "block" : "none";
+  competitorChartCard.style.display = competitor ? "block" : "none";
+  financialChartCard.style.display = financial ? "block" : "none";
+  chartsSection.style.display = market || competitor || financial ? "block" : "none";
+  if (market) marketChartInstance = new Chart(document.getElementById("marketChart"), { type: "line", data: { labels: market.years, datasets: [{ label: market.unit || "Market size", data: market.values, borderColor: "#7c9cff", backgroundColor: "rgba(124,156,255,.18)", fill: true, tension: .3 }] }, options: chartOptions(market.unit) });
+  if (competitor) {
+    const colors = ["#7c9cff", "#4ade80", "#fbbf24"];
+    competitorChartInstance = new Chart(document.getElementById("competitorChart"), { type: "radar", data: { labels: competitor.labels, datasets: competitor.competitors.slice(0, 3).map((item, index) => ({ label: item.name, data: item.scores, borderColor: colors[index], backgroundColor: colors[index] + "22", pointBackgroundColor: colors[index] })) }, options: { responsive: true, maintainAspectRatio: false, scales: { r: { min: 0, max: 10, ticks: { display: false }, angleLines: { color: "rgba(122,131,153,.25)" }, grid: { color: "rgba(122,131,153,.2)" }, pointLabels: { color: "#aeb6c8" } } }, plugins: { legend: { labels: { color: "#aeb6c8", boxWidth: 12 } } } } });
+  }
+  if (financial) financialChartInstance = new Chart(document.getElementById("financialChart"), { type: "line", data: { labels: financial.months.map(month => "M" + month), datasets: [{ label: "Revenue", data: financial.revenue, borderColor: "#4ade80", backgroundColor: "rgba(74,222,128,.12)", tension: .25 }, { label: "Expenses", data: financial.expenses, borderColor: "#f87171", backgroundColor: "rgba(248,113,113,.12)", tension: .25 }] }, options: chartOptions(financial.currency) });
+}
+
+function classifySource(url) {
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase(); } catch (error) { return { label: "Web source", type: "news" }; }
+  if (/\.gov\.|\.gov$|\.edu\.|\.edu$|who\.int|worldbank\.org|oecd\.org|un\.org|europa\.eu|mdec\.my/.test(host)) return { label: "Official / Government", type: "official" };
+  if (/statista|grandviewresearch|mckinsey|gartner|forrester|deloitte|pwc|ey\.com|kpmg/.test(host)) return { label: "Industry Report", type: "industry" };
+  if (/reuters|bloomberg|forbes|techcrunch|bbc|cnn|news|medium|blog/.test(host)) return { label: "News / Blog", type: "news" };
+  return { label: "Company / Primary", type: "company" };
+}
+
+function renderSources(sections) {
+  const combined = Object.values(sections || {}).join("\n");
+  const pattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+  const sources = [];
+  const seen = new Set();
+  let match;
+  while ((match = pattern.exec(combined)) !== null) {
+    if (!seen.has(match[2])) { seen.add(match[2]); sources.push({ title: match[1], url: match[2] }); }
+  }
+  sourcesList.innerHTML = "";
+  if (!sources.length) { sourcesSection.style.display = "none"; return; }
+  const officialCount = sources.filter(source => classifySource(source.url).type === "official").length;
+  sourcesSubtitle.textContent = sources.length + " verified links · " + officialCount + " official or government sources";
+  sources.forEach((source, index) => {
+    const quality = classifySource(source.url);
+    const row = document.createElement("div"); row.className = "source-row";
+    const number = document.createElement("span"); number.className = "source-number"; number.textContent = "[" + (index + 1) + "]";
+    const link = document.createElement("a"); link.className = "source-link"; link.href = source.url; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = source.title;
+    const badge = document.createElement("span"); badge.className = "source-quality " + quality.type; badge.textContent = quality.label;
+    row.append(number, link, badge); sourcesList.appendChild(row);
+  });
+  sourcesSection.style.display = "block";
+}
+
+function switchToMarketModeWithQuestion(opportunityName) {
+  selectedResearchMode = "market";
+  document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+  document.querySelector('.mode-btn[data-mode="market"]').classList.add("active");
+  updateModeUI();
+  questionEl.value = "Should I start a business in: " + opportunityName + "?";
+  autoGrow(questionEl);
+  opportunitySection.style.display = "none";
+  hint.textContent = "Question loaded. Click Research to proceed, or edit it first.";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function renderOpportunities(items) {
+  opportunityTableBody.innerHTML = "";
+  items.forEach(item => {
+    const tr = document.createElement("tr");
+    const diffClass = item.difficulty.toLowerCase();
+    tr.innerHTML =
+      '<td class="opp-name">' + item.opportunity + '</td>' +
+      '<td class="opp-market">' + item.market + '</td>' +
+      '<td><span class="diff-badge ' + diffClass + '">' + item.difficulty + '</span></td>' +
+      '<td><div class="opp-potential"><div class="opp-potential-track"><div class="opp-potential-fill" style="width:' + item.potential + '%"></div></div><div class="opp-potential-value">' + item.potential + '</div></div></td>' +
+      '<td></td>';
+    const actionCell = tr.querySelector("td:last-child");
+    const btn = document.createElement("button");
+    btn.className = "opp-research-btn";
+    btn.textContent = "Research this \u2192";
+    btn.addEventListener("click", () => switchToMarketModeWithQuestion(item.opportunity));
+    actionCell.appendChild(btn);
+    opportunityTableBody.appendChild(tr);
+  });
+  opportunitySection.style.display = "block";
+}
+
+async function findOpportunities(query) {
+  hint.textContent = "Searching for opportunities...";
+  submitBtn.disabled = true;
+  try {
+    const res = await fetch("/research/opportunities", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      hint.textContent = "Failed: " + (err.detail || res.statusText);
+      submitBtn.disabled = false;
+      return;
+    }
+    const data = await res.json();
+    if (!data.items || data.items.length === 0) {
+      hint.textContent = "No opportunities found. Try a broader or different query.";
+      submitBtn.disabled = false;
+      return;
+    }
+    renderOpportunities(data.items);
+    hint.textContent = "Found " + data.items.length + " opportunities.";
+  } catch (e) {
+    hint.textContent = "Network error. Please try again.";
+  }
+  submitBtn.disabled = false;
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  authError.textContent = "";
+  const confirmField = document.getElementById("confirmPasswordField");
+  if (mode === "login") {
+    authTitle.textContent = "Welcome back";
+    authSub.textContent = "Log in to continue your research";
+    authSubmitBtn.textContent = "Log In";
+    authToggleText.innerHTML = "Don't have an account? <a id=\"authToggleLink\">Sign up</a>";
+    confirmField.style.display = "none";
+  } else {
+    authTitle.textContent = "Create an account";
+    authSub.textContent = "Sign up to save your research history";
+    authSubmitBtn.textContent = "Sign Up";
+    authToggleText.innerHTML = "Already have an account? <a id=\"authToggleLink\">Log in</a>";
+    confirmField.style.display = "block";
+  }
+  document.getElementById("authToggleLink").addEventListener("click", () => setAuthMode(authMode === "login" ? "signup" : "login"));
+}
+setAuthMode("login");
+
+authSubmitBtn.addEventListener("click", async () => {
+  const email = authEmail.value.trim();
+  const password = authPassword.value;
+  authError.textContent = "";
+  if (!email || !password) { authError.textContent = "Please fill in both fields."; return; }
+  if (authMode === "signup") {
+    const confirmPassword = document.getElementById("authConfirmPassword").value;
+    if (password !== confirmPassword) { authError.textContent = "Passwords don't match."; return; }
+  }
+  const endpoint = authMode === "login" ? "/auth/login" : "/auth/signup";
+  try {
+    const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+    const data = await res.json();
+    if (!res.ok) { authError.textContent = data.detail || "Something went wrong."; return; }
+    isGuest = false;
+    authOverlay.style.display = "none";
+    await afterLogin(data.email);
+  } catch (e) {
+    authError.textContent = "Network error. Is the server running?";
+  }
+});
+
+skipLoginLink.addEventListener("click", () => enterGuestMode());
+guestLoginLink.addEventListener("click", () => { authOverlay.style.display = "flex"; });
+
+function enterGuestMode() {
+  isGuest = true;
+  authOverlay.style.display = "none";
+  sidebarUserBlock.style.display = "none";
+  document.querySelector(".history-search").style.display = "none";
+  document.querySelector(".history-label").style.display = "none";
+  historyList.style.display = "none";
+  guestNote.style.display = "block";
+  companyProfileBtn.style.display = "none";
+  companyUseRow.style.display = "none";
+}
+
+logoutBtn.addEventListener("click", async () => { await fetch("/auth/logout", { method: "POST" }); location.reload(); });
+
+async function afterLogin(email) {
+  sidebarUserBlock.style.display = "block";
+  guestNote.style.display = "none";
+  document.querySelector(".history-search").style.display = "block";
+  document.querySelector(".history-label").style.display = "flex";
+  historyList.style.display = "flex";
+  userEmailEl.textContent = email;
+  companyProfileBtn.style.display = "block";
+  const profileRes = await fetch("/company/profile");
+  companyUseRow.style.display = profileRes.ok && await profileRes.json() ? "flex" : "none";
+  await loadHistory();
+}
+
+async function checkAuth() {
+  const res = await fetch("/auth/me");
+  const data = await res.json();
+  if (data.logged_in) { authOverlay.style.display = "none"; await afterLogin(data.email); }
+  else { authOverlay.style.display = "flex"; }
+}
+checkAuth();
+
+async function loadHistory() {
+  if (isGuest) return;
+  const params = new URLSearchParams();
+  if (historySearch.value.trim()) params.set("q", historySearch.value.trim());
+  if (favFilterActive) params.set("favorites_only", "true");
+  const res = await fetch("/research/history?" + params.toString());
+  if (!res.ok) return;
+  const items = await res.json();
+  if (items.length === 0) { historyList.innerHTML = "<div class=\"history-empty\">No research found.</div>"; return; }
+  historyList.innerHTML = "";
+  items.forEach(item => {
+    const row = document.createElement("div");
+    row.className = "history-item-row" + (item.id === currentJobId ? " active" : "");
+    const star = document.createElement("button");
+    star.className = "fav-star" + (item.favorite ? " starred" : "");
+    star.textContent = item.favorite ? "★" : "☆";
+    star.title = item.favorite ? "Unfavorite" : "Favorite";
+    star.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await fetch("/research/job/" + item.id + "/favorite", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ favorite: !item.favorite }) });
+      loadHistory();
+    });
+    const text = document.createElement("div");
+    text.className = "history-item";
+    text.textContent = item.title || item.question;
+    text.addEventListener("click", () => { loadJob(item.id); if (isMobile()) setSidebarOpen(false); });
+    const more = document.createElement("button");
+    more.className = "history-more";
+    more.textContent = "\u22EF";
+    more.title = "More options";
+    more.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const choice = window.prompt("Type 'rename' to rename, or 'delete' to delete this research:", "rename");
+      if (choice === "rename") {
+        const newTitle = window.prompt("New title:", item.title || item.question);
+        if (newTitle && newTitle.trim()) {
+          await fetch("/research/job/" + item.id + "/rename", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: newTitle.trim() }) });
+          loadHistory();
+        }
+      } else if (choice === "delete") {
+        if (window.confirm("Delete this research permanently?")) {
+          await fetch("/research/job/" + item.id, { method: "DELETE" });
+          if (item.id === currentJobId) newResearchBtn.click();
+          loadHistory();
+        }
+      }
+    });
+    row.appendChild(star); row.appendChild(text); row.appendChild(more);
+    historyList.appendChild(row);
+  });
+}
+
+async function loadJob(jobId) {
+  const res = await fetch("/research/job/" + jobId);
+  if (!res.ok) return;
+  const job = await res.json();
+  currentJobId = jobId;
+  questionEl.value = job.question;
+  currentSections = job.sections || {};
+  resetCards();
+  opportunitySection.style.display = "none";
+  if (job.report) {
+    STAGE_ORDER.forEach(stage => { cards[stage].className = "agent-card complete"; cards[stage].querySelector(".state").textContent = "Done"; });
+    reportSection.style.display = "block";
+    reportText.innerHTML = marked.parse(cleanReportText(job.report));
+    renderVerdictCard(job.report);
+    renderResearchCharts(currentSections);
+    renderSources(currentSections);
+    followupSection.style.display = "block";
+    hint.textContent = "Loaded from history.";
+  } else {
+    reportSection.style.display = "none";
+    chartsSection.style.display = "none";
+    sourcesSection.style.display = "none";
+    followupSection.style.display = "none";
+    verdictSection.style.display = "none";
+    hint.textContent = "This research is still in progress or did not complete. You can start a new one.";
+  }
+  followupMessages.innerHTML = "";
+  job.messages.forEach(m => appendFollowupMessage(m.role, m.content));
+  loadHistory();
+}
+
+newResearchBtn.addEventListener("click", () => {
+  if (isResearching) return;
+  currentJobId = null;
+  currentSections = {};
+  questionEl.value = "";
+  [businessIdeaEl, industryEl, targetMarketEl, targetCustomersEl, budgetEl, researchObjectiveEl].forEach(el => { el.value = ""; });
+  businessStageEl.value = "Idea";
+  document.querySelector('input[name="researchDepth"][value="standard"]').checked = true;
+  resetCards();
+  reportSection.style.display = "none";
+  chartsSection.style.display = "none";
+  sourcesSection.style.display = "none";
+  verdictSection.style.display = "none";
+  followupSection.style.display = "none";
+  opportunitySection.style.display = "none";
+  followupMessages.innerHTML = "";
+  hint.textContent = "Enter a business question above to begin.";
+  if (isMobile()) setSidebarOpen(false);
+});
+
+const MIN_HEIGHT = 54;
+const MAX_HEIGHT = 160;
+function autoGrow(el) {
+  el.style.height = MIN_HEIGHT + "px";
+  const newHeight = Math.min(el.scrollHeight, MAX_HEIGHT);
+  el.style.height = newHeight + "px";
+}
+questionEl.addEventListener("input", () => autoGrow(questionEl));
+questionEl.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitBtn.click(); } });
+followupInput.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); followupSendBtn.click(); } });
+
+function resetCards() {
+  STAGE_ORDER.forEach(stage => { cards[stage].className = "agent-card"; cards[stage].querySelector(".state").textContent = "Idle"; });
+}
+
+function applyStage(currentStage) {
+  const currentIndex = STAGE_ORDER.indexOf(currentStage);
+  STAGE_ORDER.forEach((stage, i) => {
+    const c = cards[stage];
+    const stateEl = c.querySelector(".state");
+    if (currentStage === "done") { c.className = "agent-card complete"; stateEl.textContent = "Done"; }
+    else if (i < currentIndex) { c.className = "agent-card complete"; stateEl.textContent = "Done"; }
+    else if (i === currentIndex) { c.className = "agent-card active"; stateEl.textContent = STAGE_ACTIVITY[stage]; }
+    else { c.className = "agent-card"; stateEl.textContent = "Waiting"; }
+  });
+}
+
+function setResearching(active) {
+  isResearching = active;
+  submitBtn.disabled = active;
+  newResearchBtn.disabled = active;
+}
+
+async function pollStatus(jobId) {
+  const res = await fetch("/research/status/" + jobId);
+  if (!res.ok) { hint.textContent = "Something went wrong checking status."; setResearching(false); return; }
+  const data = await res.json();
+  if (data.status === "error") { hint.textContent = "Research failed: " + data.error; setResearching(false); return; }
+  applyStage(data.stage);
+  if (data.sections) currentSections = data.sections;
+  if (data.status === "done") {
+    hint.textContent = "Done.";
+    reportSection.style.display = "block";
+    reportText.innerHTML = marked.parse(cleanReportText(data.report));
+    renderVerdictCard(data.report);
+    renderResearchCharts(currentSections);
+    renderSources(currentSections);
+    followupSection.style.display = "block";
+    followupMessages.innerHTML = "";
+    setResearching(false);
+    loadHistory();
+    return;
+  }
+  setTimeout(() => pollStatus(jobId), 1500);
+}
+
+submitBtn.addEventListener("click", async () => {
+  let question = questionEl.value.trim();
+  if (selectedResearchMode === "opportunities") {
+    if (question.length < 10) { hint.textContent = "Please describe your interest in more detail (10+ characters)."; return; }
+    opportunitySection.style.display = "none";
+    reportSection.style.display = "none";
+    chartsSection.style.display = "none";
+    sourcesSection.style.display = "none";
+    verdictSection.style.display = "none";
+    followupSection.style.display = "none";
+    await findOpportunities(question);
+    return;
+  }
+  if (!businessIdeaEl.value.trim() || !industryEl.value.trim() || !targetMarketEl.value.trim() || !researchObjectiveEl.value.trim()) {
+    hint.textContent = "Please complete Business, Industry, Target market, and Research objective.";
+    researchSetup.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  question = buildResearchBrief();
+  const selectedDepth = document.querySelector('input[name="researchDepth"]:checked').value;
+  setResearching(true);
+  currentSections = {};
+  resetCards();
+  reportSection.style.display = "none";
+  chartsSection.style.display = "none";
+  sourcesSection.style.display = "none";
+  verdictSection.style.display = "none";
+  followupSection.style.display = "none";
+  opportunitySection.style.display = "none";
+  hint.textContent = "Starting agents...";
+  const res = await fetch("/research/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, mode: selectedResearchMode, depth: selectedDepth, use_company_profile: useCompanyProfile.checked }) });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    hint.textContent = "Failed to start: " + (err.detail || res.statusText);
+    setResearching(false);
+    return;
+  }
+  const data = await res.json();
+  currentJobId = data.job_id;
+  hint.textContent = "Agents are researching your question...";
+  loadHistory();
+  pollStatus(data.job_id);
+});
+
+function appendFollowupMessage(role, content) {
+  const div = document.createElement("div");
+  div.className = "followup-msg " + (role === "user" ? "user" : "assistant");
+  if (role === "user") div.textContent = content; else div.innerHTML = marked.parse(content);
+  followupMessages.appendChild(div);
+  followupMessages.scrollTop = followupMessages.scrollHeight;
+}
+
+followupSendBtn.addEventListener("click", async () => {
+  const message = followupInput.value.trim();
+  if (!message || !currentJobId) return;
+  appendFollowupMessage("user", message);
+  followupInput.value = "";
+  followupSendBtn.disabled = true;
+  const res = await fetch("/research/job/" + currentJobId + "/message", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
+  followupSendBtn.disabled = false;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    appendFollowupMessage("assistant", "Error: " + (err.detail || "Something went wrong."));
+    return;
+  }
+  const data = await res.json();
+  appendFollowupMessage("assistant", data.reply);
+});
+</script>
+</body>
 </html>
+
