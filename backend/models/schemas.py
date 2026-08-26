@@ -261,3 +261,11 @@ class FinanceDashboardResponse(BaseModel):
     receivables: float
     expense_breakdown_30d: Dict[str, float]
     recent_transactions: List[FinanceTransactionItem]
+
+
+class FinanceQuestionRequest(BaseModel):
+    question: str = Field(..., min_length=3, max_length=600)
+
+
+class FinanceQuestionResponse(BaseModel):
+    answer: str

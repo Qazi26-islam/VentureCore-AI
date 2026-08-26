@@ -29,9 +29,11 @@ from backend.models.schemas import (
     CustomerRequest, CustomerItem, SaleRequest, SaleRecord, SalesDashboardResponse,
     SalesQuestionRequest, SalesQuestionResponse,
     FinanceTransactionRequest, FinanceTransactionItem, FinanceDashboardResponse,
+    FinanceQuestionRequest, FinanceQuestionResponse,
 )
 from backend.agents.coordinator import run_research
 from backend.agents import followup, inventory as inventory_agent, sales as sales_agent
+from backend.agents import finance_operations as finance_agent
 from backend import jobs
 from backend.db import get_connection
 
@@ -600,6 +602,76 @@ def finance_dashboard(request: Request):
         expense_breakdown_30d={row["category"]: round(float(row["total"]), 2) for row in categories},
         recent_transactions=[FinanceTransactionItem(**dict(row)) for row in rows],
     )
+
+
+@router.post("/finance/ask", response_model=FinanceQuestionResponse)
+def ask_finance_agent(body: FinanceQuestionRequest, request: Request):
+    user_id = require_login(request)
+    finance = finance_dashboard(request)
+    sales = sales_dashboard(request)
+    inventory = inventory_dashboard(request)
+    conn = get_connection()
+    profile = conn.execute(
+        """SELECT company_name, industry, country, currency, products_services,
+                  monthly_budget, business_goals, business_stage
+           FROM company_profiles WHERE user_id = ?""",
+        (user_id,),
+    ).fetchone()
+    monthly_cash_flow = conn.execute(
+        """SELECT strftime('%Y-%m', transaction_date) AS month,
+                  SUM(CASE WHEN transaction_type = 'income' THEN amount ELSE 0 END) AS income,
+                  SUM(CASE WHEN transaction_type = 'expense' THEN amount ELSE 0 END) AS expenses
+           FROM finance_transactions
+           WHERE user_id = ? AND transaction_date >= date('now', '-6 months')
+           GROUP BY month ORDER BY month""",
+        (user_id,),
+    ).fetchall()
+    expense_categories = conn.execute(
+        """SELECT COALESCE(category, 'Other') AS category, SUM(amount) AS amount
+           FROM finance_transactions
+           WHERE user_id = ? AND transaction_type = 'expense'
+             AND transaction_date >= date('now', '-90 days')
+           GROUP BY category ORDER BY amount DESC""",
+        (user_id,),
+    ).fetchall()
+    outstanding_invoices = conn.execute(
+        """SELECT s.id, c.name AS customer_name, s.total_amount, s.due_date,
+                  CASE WHEN s.due_date IS NOT NULL AND date(s.due_date) < date('now')
+                       THEN 'overdue' ELSE 'due' END AS status
+           FROM sales_orders s LEFT JOIN customers c ON c.id = s.customer_id
+           WHERE s.user_id = ? AND s.payment_status != 'paid'
+           ORDER BY COALESCE(s.due_date, '9999-12-31') LIMIT 50""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    finance_context = {
+        "company_profile": dict(profile) if profile else {"currency": "MYR"},
+        "finance_dashboard": finance.model_dump(),
+        "sales_summary": {
+            "revenue_30d": sales.revenue_30d,
+            "cash_collected_30d": sales.cash_collected_30d,
+            "outstanding_amount": sales.outstanding_amount,
+            "orders_30d": sales.orders_30d,
+        },
+        "inventory_commitments": {
+            "current_inventory_value": round(sum(item.inventory_value for item in inventory), 2),
+            "estimated_reorder_cost": round(sum(item.estimated_reorder_cost for item in inventory), 2),
+            "products_needing_attention": sum(item.status != "Healthy" for item in inventory),
+        },
+        "monthly_cash_flow_last_6_months": [dict(row) for row in monthly_cash_flow],
+        "expense_categories_last_90_days": [dict(row) for row in expense_categories],
+        "outstanding_invoices": [dict(row) for row in outstanding_invoices],
+        "data_limitations": [
+            "Cash balance includes only transactions recorded in VentureCore.",
+            "No bank account, loan, tax, payroll, or external accounting balance is connected unless manually recorded.",
+        ],
+    }
+    try:
+        answer = finance_agent.run(body.question, finance_context)
+    except Exception as exc:
+        logger.exception("Finance Agent failed: %s", exc)
+        raise HTTPException(status_code=502, detail="The Finance Agent is temporarily unavailable. Please try again.")
+    return FinanceQuestionResponse(answer=answer)
 
 
 @router.post("/research/start", response_model=StartResponse)

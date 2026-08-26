@@ -110,8 +110,8 @@
   .inventory-ai h3 { margin:0 0 4px; font-size:14px; }
   .inventory-ai p { margin:0 0 10px; }
   .inventory-quick-questions { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
-  .inventory-question-btn, .sales-question-btn { border:1px solid var(--border); background:var(--panel2); color:var(--muted); border-radius:999px; padding:5px 9px; font-size:11px; cursor:pointer; }
-  .inventory-question-btn:hover, .sales-question-btn:hover { color:var(--accent); border-color:var(--accent); }
+  .inventory-question-btn, .sales-question-btn, .finance-question-btn { border:1px solid var(--border); background:var(--panel2); color:var(--muted); border-radius:999px; padding:5px 9px; font-size:11px; cursor:pointer; }
+  .inventory-question-btn:hover, .sales-question-btn:hover, .finance-question-btn:hover { color:var(--accent); border-color:var(--accent); }
   .inventory-ai-input { display:flex; gap:8px; align-items:flex-end; }
   .inventory-ai-input textarea { flex:1; min-height:44px; max-height:100px; resize:vertical; border:1px solid var(--border); background:var(--panel2); color:var(--text); padding:10px; border-radius:9px; font:inherit; font-size:13px; }
   .inventory-ai-answer { display:none; margin-top:12px; padding:12px; border-radius:9px; background:var(--panel2); color:var(--text); white-space:pre-wrap; font-size:12.5px; line-height:1.6; }
@@ -561,6 +561,20 @@
     <div class="sales-summary" id="financeSummary"></div>
     <h3 style="font-size:14px;margin:16px 0 4px;">30-day expense breakdown</h3>
     <div class="expense-breakdown" id="expenseBreakdown"><span class="supplier-chip">No expenses recorded</span></div>
+    <div class="inventory-ai">
+      <h3>Ask the Finance Agent</h3>
+      <p>It combines recorded cash flow, sales collections, receivables, expenses, and inventory commitments.</p>
+      <div class="inventory-quick-questions">
+        <button class="finance-question-btn" data-question="Can we afford the currently recommended inventory reorders? Explain the assumptions and risks.">Can we afford reordering?</button>
+        <button class="finance-question-btn" data-question="Explain our current cash-flow position and the biggest financial risks.">Explain cash flow</button>
+        <button class="finance-question-btn" data-question="Which expenses should I review first based on our recorded data?">Review expenses</button>
+      </div>
+      <div class="inventory-ai-input">
+        <textarea id="financeQuestion" placeholder="Ask about cash flow, expenses, receivables, budgets, or inventory affordability..."></textarea>
+        <button class="primary" id="financeAskBtn" style="padding:11px 15px;">Ask AI</button>
+      </div>
+      <div class="inventory-ai-answer" id="financeAiAnswer"></div>
+    </div>
     <div style="overflow:auto;"><table class="sales-table"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Amount</th><th>Source</th></tr></thead><tbody id="financeTableBody"></tbody></table></div>
     <div class="company-modal-actions"><button class="export-pdf-btn" id="financeCloseBtn">Close</button></div>
   </div>
@@ -825,6 +839,9 @@ const financeAddBtn = document.getElementById("financeAddBtn");
 const financeSummary = document.getElementById("financeSummary");
 const expenseBreakdown = document.getElementById("expenseBreakdown");
 const financeTableBody = document.getElementById("financeTableBody");
+const financeQuestion = document.getElementById("financeQuestion");
+const financeAskBtn = document.getElementById("financeAskBtn");
+const financeAiAnswer = document.getElementById("financeAiAnswer");
 const productFields = { name: document.getElementById("productName"), sku: document.getElementById("productSku"), category: document.getElementById("productCategory"), unit_cost: document.getElementById("productCost"), selling_price: document.getElementById("productPrice"), reorder_point: document.getElementById("productReorder"), lead_time_days: document.getElementById("productLeadTime") };
 const historyList = document.getElementById("historyList");
 const historySearch = document.getElementById("historySearch");
@@ -1171,6 +1188,23 @@ async function loadFinanceWorkspace() {
   expenseBreakdown.innerHTML = categories.length ? categories.map(([category, total]) => '<span class="supplier-chip"><strong>' + escapeHtml(category) + '</strong> · ' + currency(total) + '</span>').join("") : '<span class="supplier-chip">No expenses recorded</span>';
   financeTableBody.innerHTML = dashboard.recent_transactions.length ? dashboard.recent_transactions.map(item => '<tr><td>' + escapeHtml(item.transaction_date) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.transaction_type) + '</td><td>' + escapeHtml(item.category) + '</td><td>' + escapeHtml(item.description || "—") + '</td><td class="finance-amount ' + item.transaction_type + '">' + (item.transaction_type === "income" ? "+" : "−") + currency(item.amount) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.source) + '</td></tr>').join("") : '<tr><td colspan="6">No finance transactions yet.</td></tr>';
 }
+async function askFinanceAgent(questionText) {
+  const question = (questionText || financeQuestion.value).trim();
+  if (!question) { alert("Enter a finance question."); return; }
+  financeQuestion.value = question;
+  financeAskBtn.disabled = true;
+  financeAskBtn.textContent = "Thinking...";
+  financeAiAnswer.style.display = "block";
+  financeAiAnswer.textContent = "The Finance Agent is reviewing cash flow, sales, receivables, and inventory commitments...";
+  const res = await fetch("/finance/ask", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ question }) });
+  const data = await res.json().catch(() => ({}));
+  financeAskBtn.disabled = false;
+  financeAskBtn.textContent = "Ask AI";
+  financeAiAnswer.textContent = res.ok ? data.answer : (data.detail || "The Finance Agent could not answer right now.");
+}
+financeAskBtn.addEventListener("click", () => askFinanceAgent());
+document.querySelectorAll(".finance-question-btn").forEach(button => button.addEventListener("click", () => askFinanceAgent(button.dataset.question)));
+financeQuestion.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); askFinanceAgent(); } });
 financeOpenBtn.addEventListener("click", async () => {
   if (isGuest) { authOverlay.style.display = "flex"; return; }
   dataModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.remove("visible"); salesModalOverlay.classList.remove("visible");
