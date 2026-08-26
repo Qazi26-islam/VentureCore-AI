@@ -28,6 +28,7 @@ from backend.models.schemas import (
     InventoryQuestionRequest, InventoryQuestionResponse,
     CustomerRequest, CustomerItem, SaleRequest, SaleRecord, SalesDashboardResponse,
     SalesQuestionRequest, SalesQuestionResponse,
+    FinanceTransactionRequest, FinanceTransactionItem, FinanceDashboardResponse,
 )
 from backend.agents.coordinator import run_research
 from backend.agents import followup, inventory as inventory_agent, sales as sales_agent
@@ -391,6 +392,13 @@ def record_sale(body: SaleRequest, request: Request):
            VALUES (?, ?, 'sold', ?, NULL, ?)""",
         (body.product_id, user_id, -body.quantity, f"Sale #{sale_id}: {body.reference_note}".strip()),
     )
+    if body.payment_status == "paid":
+        conn.execute(
+            """INSERT OR IGNORE INTO finance_transactions
+               (user_id, transaction_type, amount, category, description, source, related_sale_id, transaction_date)
+               VALUES (?, 'income', ?, 'Sales Revenue', ?, 'sale', ?, date('now'))""",
+            (user_id, total_amount, f"Payment received for sale #{sale_id}", sale_id),
+        )
     conn.commit()
     row = conn.execute("SELECT created_at FROM sales_orders WHERE id = ?", (sale_id,)).fetchone()
     conn.close()
@@ -400,6 +408,30 @@ def record_sale(body: SaleRequest, request: Request):
         unit_price=unit_price, total_amount=total_amount, payment_status=effective_status,
         due_date=body.due_date, created_at=row["created_at"],
     )
+
+
+@router.post("/sales/orders/{sale_id}/mark-paid")
+def mark_sale_paid(sale_id: int, request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    sale = conn.execute(
+        "SELECT id, total_amount, payment_status FROM sales_orders WHERE id = ? AND user_id = ?",
+        (sale_id, user_id),
+    ).fetchone()
+    if sale is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Sale not found.")
+    if sale["payment_status"] != "paid":
+        conn.execute("UPDATE sales_orders SET payment_status = 'paid' WHERE id = ?", (sale_id,))
+        conn.execute(
+            """INSERT OR IGNORE INTO finance_transactions
+               (user_id, transaction_type, amount, category, description, source, related_sale_id, transaction_date)
+               VALUES (?, 'income', ?, 'Sales Revenue', ?, 'sale', ?, date('now'))""",
+            (user_id, float(sale["total_amount"]), f"Payment received for sale #{sale_id}", sale_id),
+        )
+        conn.commit()
+    conn.close()
+    return {"status": "paid", "sale_id": sale_id}
 
 
 @router.get("/sales/dashboard", response_model=SalesDashboardResponse)
@@ -501,6 +533,73 @@ def ask_sales_agent(body: SalesQuestionRequest, request: Request):
         logger.exception("Sales Agent failed: %s", exc)
         raise HTTPException(status_code=502, detail="The Sales Agent is temporarily unavailable. Please try again.")
     return SalesQuestionResponse(answer=answer)
+
+
+@router.post("/finance/transactions", response_model=FinanceTransactionItem)
+def create_finance_transaction(body: FinanceTransactionRequest, request: Request):
+    user_id = require_login(request)
+    transaction_date = body.transaction_date or datetime.now().strftime("%Y-%m-%d")
+    try:
+        datetime.strptime(transaction_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Transaction date must use YYYY-MM-DD format.")
+    conn = get_connection()
+    cursor = conn.execute(
+        """INSERT INTO finance_transactions
+           (user_id, transaction_type, amount, category, description, source, transaction_date)
+           VALUES (?, ?, ?, ?, ?, 'manual', ?)""",
+        (user_id, body.transaction_type, body.amount, body.category, body.description, transaction_date),
+    )
+    conn.commit()
+    row = conn.execute(
+        """SELECT id, transaction_type, amount, category, description, source, transaction_date
+           FROM finance_transactions WHERE id = ?""",
+        (cursor.lastrowid,),
+    ).fetchone()
+    conn.close()
+    return FinanceTransactionItem(**dict(row))
+
+
+@router.get("/finance/dashboard", response_model=FinanceDashboardResponse)
+def finance_dashboard(request: Request):
+    user_id = require_login(request)
+    conn = get_connection()
+    totals = conn.execute(
+        """SELECT
+             COALESCE(SUM(CASE WHEN transaction_type = 'income' AND transaction_date >= date('now', '-30 days') THEN amount ELSE 0 END), 0) AS income_30d,
+             COALESCE(SUM(CASE WHEN transaction_type = 'expense' AND transaction_date >= date('now', '-30 days') THEN amount ELSE 0 END), 0) AS expenses_30d,
+             COALESCE(SUM(CASE WHEN transaction_type = 'income' THEN amount ELSE -amount END), 0) AS cash_balance
+           FROM finance_transactions WHERE user_id = ?""",
+        (user_id,),
+    ).fetchone()
+    receivables = conn.execute(
+        "SELECT COALESCE(SUM(total_amount), 0) FROM sales_orders WHERE user_id = ? AND payment_status != 'paid'",
+        (user_id,),
+    ).fetchone()[0]
+    categories = conn.execute(
+        """SELECT COALESCE(category, 'Other') AS category, SUM(amount) AS total
+           FROM finance_transactions
+           WHERE user_id = ? AND transaction_type = 'expense' AND transaction_date >= date('now', '-30 days')
+           GROUP BY category ORDER BY total DESC""",
+        (user_id,),
+    ).fetchall()
+    rows = conn.execute(
+        """SELECT id, transaction_type, amount, COALESCE(category, 'Other') AS category,
+                  COALESCE(description, '') AS description, source, transaction_date
+           FROM finance_transactions WHERE user_id = ?
+           ORDER BY transaction_date DESC, id DESC LIMIT 30""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    income_30d = float(totals["income_30d"])
+    expenses_30d = float(totals["expenses_30d"])
+    return FinanceDashboardResponse(
+        income_30d=round(income_30d, 2), expenses_30d=round(expenses_30d, 2),
+        net_cash_flow_30d=round(income_30d - expenses_30d, 2),
+        cash_balance=round(float(totals["cash_balance"]), 2), receivables=round(float(receivables), 2),
+        expense_breakdown_30d={row["category"]: round(float(row["total"]), 2) for row in categories},
+        recent_transactions=[FinanceTransactionItem(**dict(row)) for row in rows],
+    )
 
 
 @router.post("/research/start", response_model=StartResponse)

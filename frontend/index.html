@@ -64,14 +64,17 @@
   .inventory-btn:hover { border-color:var(--accent); color:var(--accent); }
   .sales-btn { width:100%; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:12px; font-weight:600; cursor:pointer; margin-bottom:8px; }
   .sales-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .finance-btn { width:100%; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--panel); color:var(--text); font-size:12px; font-weight:600; cursor:pointer; margin-bottom:8px; }
+  .finance-btn:hover { border-color:var(--accent); color:var(--accent); }
   .company-use { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: -4px 0 14px; cursor: pointer; }
   #companyModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
   #companyModalOverlay.visible { display: flex; }
-  #dataModalOverlay, #inventoryModalOverlay, #salesModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
-  #dataModalOverlay.visible, #inventoryModalOverlay.visible, #salesModalOverlay.visible { display: flex; }
+  #dataModalOverlay, #inventoryModalOverlay, #salesModalOverlay, #financeModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
+  #dataModalOverlay.visible, #inventoryModalOverlay.visible, #salesModalOverlay.visible, #financeModalOverlay.visible { display: flex; }
   .company-modal { width: min(680px, 100%); max-height: 88vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
   #inventoryModalOverlay .company-modal { width:min(1080px, 100%); }
   #salesModalOverlay .company-modal { width:min(980px, 100%); }
+  #financeModalOverlay .company-modal { width:min(920px, 100%); }
   .company-modal h2 { margin: 0 0 4px; font-size: 18px; }
   .company-modal p { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
   .company-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
@@ -120,6 +123,9 @@
   .payment-status.paid { color:var(--done); background:rgba(74,222,128,.12); }
   .payment-status.due { color:var(--warn); background:rgba(251,191,36,.12); }
   .payment-status.overdue { color:var(--error); background:rgba(248,113,113,.12); }
+  .finance-amount.income { color:var(--done); font-weight:700; }
+  .finance-amount.expense { color:var(--error); font-weight:700; }
+  .expense-breakdown { display:flex; flex-wrap:wrap; gap:7px; margin:10px 0 14px; }
   .new-research-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .new-research-btn:disabled:hover { border-color: var(--border); }
   .history-search { width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 12px; margin-bottom: 10px; flex-shrink: 0; }
@@ -532,8 +538,31 @@
       </div>
       <div class="inventory-ai-answer" id="salesAiAnswer"></div>
     </div>
-    <div style="overflow:auto;"><table class="sales-table"><thead><tr><th>Date</th><th>Customer</th><th>Product</th><th>Quantity</th><th>Total</th><th>Payment</th></tr></thead><tbody id="salesTableBody"></tbody></table></div>
+    <div style="overflow:auto;"><table class="sales-table"><thead><tr><th>Date</th><th>Customer</th><th>Product</th><th>Quantity</th><th>Total</th><th>Payment</th><th>Action</th></tr></thead><tbody id="salesTableBody"></tbody></table></div>
     <div class="company-modal-actions"><button class="export-pdf-btn" id="salesCloseBtn">Close</button></div>
+  </div>
+</div>
+
+<div id="financeModalOverlay">
+  <div class="company-modal">
+    <h2>Finance &amp; Cash Flow</h2>
+    <p>Paid sales appear automatically as income. Add operating expenses and other cash movements here.</p>
+    <div class="inventory-section">
+      <h3>Record income or expense</h3>
+      <div class="company-form-grid">
+        <div><label>Transaction type</label><select id="financeType"><option value="expense">Expense</option><option value="income">Other income</option></select></div>
+        <div><label>Amount *</label><input id="financeAmount" type="number" min="0.01" step="0.01" placeholder="500.00"></div>
+        <div><label>Category</label><select id="financeCategory"><option>Inventory Purchase</option><option>Salary</option><option>Rent</option><option>Marketing</option><option>Utilities</option><option>Tax</option><option>Other</option></select></div>
+        <div><label>Date</label><input id="financeDate" type="date"></div>
+        <div class="full"><label>Description</label><input id="financeDescription" placeholder="What was this transaction for?"></div>
+      </div>
+      <div class="company-modal-actions"><button class="primary" id="financeAddBtn" style="padding:10px 15px;">Add Transaction</button></div>
+    </div>
+    <div class="sales-summary" id="financeSummary"></div>
+    <h3 style="font-size:14px;margin:16px 0 4px;">30-day expense breakdown</h3>
+    <div class="expense-breakdown" id="expenseBreakdown"><span class="supplier-chip">No expenses recorded</span></div>
+    <div style="overflow:auto;"><table class="sales-table"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Amount</th><th>Source</th></tr></thead><tbody id="financeTableBody"></tbody></table></div>
+    <div class="company-modal-actions"><button class="export-pdf-btn" id="financeCloseBtn">Close</button></div>
   </div>
 </div>
 
@@ -549,6 +578,7 @@
       <button class="company-btn" id="companyProfileBtn">My Company</button>
       <button class="inventory-btn" id="inventoryOpenBtn">Inventory</button>
       <button class="sales-btn" id="salesOpenBtn">Sales &amp; CRM</button>
+      <button class="finance-btn" id="financeOpenBtn">Finance &amp; Cash Flow</button>
       <button class="data-btn" id="dataCheckOpenBtn">Check Business Data</button>
       <input type="text" class="history-search" id="historySearch" placeholder="Search research...">
       <div class="history-label">
@@ -735,6 +765,7 @@ const newResearchBtn = document.getElementById("newResearchBtn");
 const companyProfileBtn = document.getElementById("companyProfileBtn");
 const inventoryOpenBtn = document.getElementById("inventoryOpenBtn");
 const salesOpenBtn = document.getElementById("salesOpenBtn");
+const financeOpenBtn = document.getElementById("financeOpenBtn");
 const dataCheckOpenBtn = document.getElementById("dataCheckOpenBtn");
 const companyModalOverlay = document.getElementById("companyModalOverlay");
 const companyUseRow = document.getElementById("companyUseRow");
@@ -783,6 +814,17 @@ const salesTableBody = document.getElementById("salesTableBody");
 const salesQuestion = document.getElementById("salesQuestion");
 const salesAskBtn = document.getElementById("salesAskBtn");
 const salesAiAnswer = document.getElementById("salesAiAnswer");
+const financeModalOverlay = document.getElementById("financeModalOverlay");
+const financeCloseBtn = document.getElementById("financeCloseBtn");
+const financeType = document.getElementById("financeType");
+const financeAmount = document.getElementById("financeAmount");
+const financeCategory = document.getElementById("financeCategory");
+const financeDate = document.getElementById("financeDate");
+const financeDescription = document.getElementById("financeDescription");
+const financeAddBtn = document.getElementById("financeAddBtn");
+const financeSummary = document.getElementById("financeSummary");
+const expenseBreakdown = document.getElementById("expenseBreakdown");
+const financeTableBody = document.getElementById("financeTableBody");
 const productFields = { name: document.getElementById("productName"), sku: document.getElementById("productSku"), category: document.getElementById("productCategory"), unit_cost: document.getElementById("productCost"), selling_price: document.getElementById("productPrice"), reorder_point: document.getElementById("productReorder"), lead_time_days: document.getElementById("productLeadTime") };
 const historyList = document.getElementById("historyList");
 const historySearch = document.getElementById("historySearch");
@@ -918,6 +960,7 @@ dataCheckOpenBtn.addEventListener("click", () => {
   if (isGuest) { authOverlay.style.display = "flex"; return; }
   inventoryModalOverlay.classList.remove("visible");
   salesModalOverlay.classList.remove("visible");
+  financeModalOverlay.classList.remove("visible");
   qualityResult.style.display = "none";
   dataModalOverlay.classList.add("visible");
 });
@@ -994,7 +1037,7 @@ async function recordStockMovement(item, transactionType) {
   if (!res.ok) { alert(data.detail || "Could not record stock movement."); return; }
   loadInventory();
 }
-inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } dataModalOverlay.classList.remove("visible"); salesModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.add("visible"); await Promise.all([loadSuppliers(), loadInventory()]); });
+inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } dataModalOverlay.classList.remove("visible"); salesModalOverlay.classList.remove("visible"); financeModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.add("visible"); await Promise.all([loadSuppliers(), loadInventory()]); });
 inventoryCloseBtn.addEventListener("click", () => inventoryModalOverlay.classList.remove("visible"));
 inventoryModalOverlay.addEventListener("click", event => { if (event.target === inventoryModalOverlay) inventoryModalOverlay.classList.remove("visible"); });
 supplierAddBtn.addEventListener("click", async () => {
@@ -1030,7 +1073,7 @@ async function loadSalesWorkspace() {
     fetch("/sales/customers"), fetch("/inventory/dashboard"), fetch("/sales/dashboard")
   ]);
   if (!customersRes.ok || !productsRes.ok || !dashboardRes.ok) {
-    salesTableBody.innerHTML = '<tr><td colspan="6">Could not load Sales &amp; CRM.</td></tr>';
+    salesTableBody.innerHTML = '<tr><td colspan="7">Could not load Sales &amp; CRM.</td></tr>';
     return;
   }
   const customers = await customersRes.json();
@@ -1040,7 +1083,15 @@ async function loadSalesWorkspace() {
   customerList.innerHTML = customers.length ? customers.map(customer => '<span class="supplier-chip"><strong>' + escapeHtml(customer.name) + '</strong>' + (customer.segment ? ' · ' + escapeHtml(customer.segment) : '') + '</span>').join("") : '<span class="supplier-chip">No customers yet</span>';
   saleProduct.innerHTML = '<option value="">Choose product</option>' + products.map(product => '<option value="' + product.id + '" data-price="' + product.selling_price + '">' + escapeHtml(product.name) + ' · ' + product.current_stock + ' in stock</option>').join("");
   salesSummary.innerHTML = '<div class="inventory-stat"><span>30-day revenue</span><strong>' + currency(dashboard.revenue_30d) + '</strong></div><div class="inventory-stat"><span>Cash collected</span><strong>' + currency(dashboard.cash_collected_30d) + '</strong></div><div class="inventory-stat"><span>Outstanding</span><strong>' + currency(dashboard.outstanding_amount) + '</strong></div><div class="inventory-stat"><span>Orders</span><strong>' + dashboard.orders_30d + '</strong></div><div class="inventory-stat"><span>Top customer</span><strong>' + escapeHtml(dashboard.top_customer || "Not enough data") + '</strong></div>';
-  salesTableBody.innerHTML = dashboard.recent_sales.length ? dashboard.recent_sales.map(sale => '<tr><td>' + escapeHtml(sale.created_at.slice(0, 10)) + '</td><td>' + escapeHtml(sale.customer_name || "Walk-in") + '</td><td>' + escapeHtml(sale.product_name) + '</td><td>' + sale.quantity + '</td><td>' + currency(sale.total_amount) + '</td><td><span class="payment-status ' + sale.payment_status + '">' + escapeHtml(sale.payment_status) + '</span></td></tr>').join("") : '<tr><td colspan="6">No sales recorded yet.</td></tr>';
+  salesTableBody.innerHTML = dashboard.recent_sales.length ? dashboard.recent_sales.map(sale => '<tr><td>' + escapeHtml(sale.created_at.slice(0, 10)) + '</td><td>' + escapeHtml(sale.customer_name || "Walk-in") + '</td><td>' + escapeHtml(sale.product_name) + '</td><td>' + sale.quantity + '</td><td>' + currency(sale.total_amount) + '</td><td><span class="payment-status ' + sale.payment_status + '">' + escapeHtml(sale.payment_status) + '</span></td><td>' + (sale.payment_status === "paid" ? '<span style="color:var(--muted)">—</span>' : '<button class="stock-action mark-paid-btn" data-sale-id="' + sale.id + '">Mark paid</button>') + '</td></tr>').join("") : '<tr><td colspan="7">No sales recorded yet.</td></tr>';
+  document.querySelectorAll(".mark-paid-btn").forEach(button => button.addEventListener("click", () => markSalePaid(Number(button.dataset.saleId))));
+}
+
+async function markSalePaid(saleId) {
+  const res = await fetch("/sales/orders/" + saleId + "/mark-paid", { method:"POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.detail || "Could not mark this sale as paid."); return; }
+  await loadSalesWorkspace();
 }
 
 async function askSalesAgent(questionText) {
@@ -1065,6 +1116,7 @@ salesOpenBtn.addEventListener("click", async () => {
   if (isGuest) { authOverlay.style.display = "flex"; return; }
   dataModalOverlay.classList.remove("visible");
   inventoryModalOverlay.classList.remove("visible");
+  financeModalOverlay.classList.remove("visible");
   salesModalOverlay.classList.add("visible");
   await loadSalesWorkspace();
 });
@@ -1104,6 +1156,41 @@ saleAddBtn.addEventListener("click", async () => {
   if (!res.ok) { alert(data.detail || "Could not record this sale."); return; }
   saleQuantity.value = ""; saleReference.value = ""; saleDueDate.value = "";
   await loadSalesWorkspace();
+});
+
+function localDateString() {
+  const date = new Date();
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+}
+async function loadFinanceWorkspace() {
+  const res = await fetch("/finance/dashboard");
+  if (!res.ok) { financeTableBody.innerHTML = '<tr><td colspan="6">Could not load Finance.</td></tr>'; return; }
+  const dashboard = await res.json();
+  financeSummary.innerHTML = '<div class="inventory-stat"><span>30-day income</span><strong>' + currency(dashboard.income_30d) + '</strong></div><div class="inventory-stat"><span>30-day expenses</span><strong>' + currency(dashboard.expenses_30d) + '</strong></div><div class="inventory-stat"><span>Net cash flow</span><strong>' + currency(dashboard.net_cash_flow_30d) + '</strong></div><div class="inventory-stat"><span>Recorded cash balance</span><strong>' + currency(dashboard.cash_balance) + '</strong></div><div class="inventory-stat"><span>Receivables</span><strong>' + currency(dashboard.receivables) + '</strong></div>';
+  const categories = Object.entries(dashboard.expense_breakdown_30d);
+  expenseBreakdown.innerHTML = categories.length ? categories.map(([category, total]) => '<span class="supplier-chip"><strong>' + escapeHtml(category) + '</strong> · ' + currency(total) + '</span>').join("") : '<span class="supplier-chip">No expenses recorded</span>';
+  financeTableBody.innerHTML = dashboard.recent_transactions.length ? dashboard.recent_transactions.map(item => '<tr><td>' + escapeHtml(item.transaction_date) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.transaction_type) + '</td><td>' + escapeHtml(item.category) + '</td><td>' + escapeHtml(item.description || "—") + '</td><td class="finance-amount ' + item.transaction_type + '">' + (item.transaction_type === "income" ? "+" : "−") + currency(item.amount) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.source) + '</td></tr>').join("") : '<tr><td colspan="6">No finance transactions yet.</td></tr>';
+}
+financeOpenBtn.addEventListener("click", async () => {
+  if (isGuest) { authOverlay.style.display = "flex"; return; }
+  dataModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.remove("visible"); salesModalOverlay.classList.remove("visible");
+  financeModalOverlay.classList.add("visible");
+  if (!financeDate.value) financeDate.value = localDateString();
+  await loadFinanceWorkspace();
+});
+financeCloseBtn.addEventListener("click", () => financeModalOverlay.classList.remove("visible"));
+financeModalOverlay.addEventListener("click", event => { if (event.target === financeModalOverlay) financeModalOverlay.classList.remove("visible"); });
+financeType.addEventListener("change", () => { if (financeType.value === "income") financeCategory.value = "Other"; });
+financeAddBtn.addEventListener("click", async () => {
+  const payload = { transaction_type:financeType.value, amount:Number(financeAmount.value), category:financeCategory.value, description:financeDescription.value.trim(), transaction_date:financeDate.value || null };
+  if (!Number.isFinite(payload.amount) || payload.amount <= 0) { alert("Enter a valid transaction amount."); return; }
+  financeAddBtn.disabled = true;
+  const res = await fetch("/finance/transactions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  financeAddBtn.disabled = false;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(data.detail || "Could not add this transaction."); return; }
+  financeAmount.value = ""; financeDescription.value = "";
+  await loadFinanceWorkspace();
 });
 
 function buildResearchBrief() {
@@ -1453,6 +1540,7 @@ function enterGuestMode() {
   companyProfileBtn.style.display = "none";
   inventoryOpenBtn.style.display = "none";
   salesOpenBtn.style.display = "none";
+  financeOpenBtn.style.display = "none";
   dataCheckOpenBtn.style.display = "none";
   companyUseRow.style.display = "none";
 }
@@ -1469,6 +1557,7 @@ async function afterLogin(email) {
   companyProfileBtn.style.display = "block";
   inventoryOpenBtn.style.display = "block";
   salesOpenBtn.style.display = "block";
+  financeOpenBtn.style.display = "block";
   dataCheckOpenBtn.style.display = "block";
   const profileRes = await fetch("/company/profile");
   companyUseRow.style.display = profileRes.ok && await profileRes.json() ? "flex" : "none";

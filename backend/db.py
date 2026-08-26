@@ -165,6 +165,31 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS finance_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            transaction_type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            category TEXT,
+            description TEXT,
+            source TEXT DEFAULT 'manual',
+            related_sale_id INTEGER UNIQUE,
+            transaction_date TEXT DEFAULT CURRENT_DATE,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (related_sale_id) REFERENCES sales_orders(id)
+        )
+    """)
+
+    cursor.execute("""
+        INSERT OR IGNORE INTO finance_transactions
+        (user_id, transaction_type, amount, category, description, source, related_sale_id, transaction_date)
+        SELECT user_id, 'income', total_amount, 'Sales Revenue',
+               'Payment received for sale #' || id, 'sale', id, date(created_at)
+        FROM sales_orders WHERE payment_status = 'paid'
+    """)
+
     # Add new columns to existing tables if upgrading from an older version
     existing_cols = [row["name"] for row in cursor.execute("PRAGMA table_info(research_jobs)")]
     if "title" not in existing_cols:

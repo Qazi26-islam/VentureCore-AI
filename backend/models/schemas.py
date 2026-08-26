@@ -233,3 +233,31 @@ class SalesQuestionRequest(BaseModel):
 
 class SalesQuestionResponse(BaseModel):
     answer: str
+
+
+class FinanceTransactionRequest(BaseModel):
+    transaction_type: str = Field(..., pattern="^(income|expense)$")
+    amount: float = Field(..., gt=0)
+    category: str = Field(default="Other", max_length=100)
+    description: str = Field(default="", max_length=300)
+    transaction_date: Optional[str] = Field(default=None, max_length=10)
+
+
+class FinanceTransactionItem(BaseModel):
+    id: int
+    transaction_type: str
+    amount: float
+    category: str
+    description: str
+    source: str
+    transaction_date: str
+
+
+class FinanceDashboardResponse(BaseModel):
+    income_30d: float
+    expenses_30d: float
+    net_cash_flow_30d: float
+    cash_balance: float
+    receivables: float
+    expense_breakdown_30d: Dict[str, float]
+    recent_transactions: List[FinanceTransactionItem]
