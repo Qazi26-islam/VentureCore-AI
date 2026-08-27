@@ -26,12 +26,6 @@ def run(question: str, company_profile: dict, inventory_items: list) -> str:
     context = {
         "company_profile": company_profile,
         "inventory_snapshot": inventory_items,
-        "calculation_notes": {
-            "average_daily_sales": "Units recorded as sold in the last 30 days divided by 30.",
-            "days_of_stock": "Current stock divided by average daily sales; null means no recent sales history.",
-            "recommended_reorder_quantity": "Enough stock to cover the larger of two reorder-point quantities or forecast demand for supplier lead time plus 14 safety days.",
-            "estimated_reorder_cost": "Recommended reorder quantity multiplied by unit cost.",
-        },
     }
     prompt = (
         "Here is the signed-in company's current inventory context:\n"

@@ -99,11 +99,11 @@ class CompanyProfileRequest(BaseModel):
     company_name: str = Field(..., min_length=2, max_length=160)
     industry: str = Field(default="", max_length=120)
     country: str = Field(default="", max_length=120)
-    currency: str = Field(default="MYR", max_length=12)
+    currency: str = Field(default="MYR", pattern="^[A-Z]{3}$")
     products_services: str = Field(default="", max_length=500)
     target_customers: str = Field(default="", max_length=500)
     main_competitors: str = Field(default="", max_length=500)
-    monthly_budget: str = Field(default="", max_length=100)
+    monthly_budget_minor: Optional[int] = Field(default=None, ge=0)
     business_goals: str = Field(default="", max_length=700)
     business_stage: str = Field(default="Existing business", max_length=80)
 
@@ -143,8 +143,9 @@ class ProductRequest(BaseModel):
     sku: str = Field(default="", max_length=80)
     category: str = Field(default="", max_length=100)
     supplier_id: Optional[int] = None
-    unit_cost: float = Field(default=0, ge=0)
-    selling_price: float = Field(default=0, ge=0)
+    unit_cost_minor: int = Field(default=0, ge=0)
+    selling_price_minor: int = Field(default=0, ge=0)
+    currency: str = Field(default="MYR", pattern="^[A-Z]{3}$")
     reorder_point: float = Field(default=0, ge=0)
     lead_time_days: int = Field(default=7, ge=0, le=365)
 
@@ -153,7 +154,8 @@ class StockMovementRequest(BaseModel):
     transaction_type: str = Field(..., pattern="^(received|sold|damaged|adjustment)$")
     quantity: float = Field(..., gt=0)
     reference_note: str = Field(default="", max_length=300)
-    unit_cost: Optional[float] = Field(default=None, ge=0)
+    unit_cost_minor: Optional[int] = Field(default=None, ge=0)
+    currency: str = Field(default="MYR", pattern="^[A-Z]{3}$")
 
 
 class InventoryItem(BaseModel):
@@ -162,9 +164,10 @@ class InventoryItem(BaseModel):
     name: str
     category: str
     current_stock: float
-    unit_cost: float
-    selling_price: float
-    inventory_value: float
+    unit_cost_minor: int
+    selling_price_minor: int
+    inventory_value_minor: int
+    currency: str
     reorder_point: float
     lead_time_days: int
     supplier_name: Optional[str] = None
@@ -172,7 +175,7 @@ class InventoryItem(BaseModel):
     average_daily_sales: float
     days_of_stock: Optional[float] = None
     recommended_reorder_quantity: int
-    estimated_reorder_cost: float
+    estimated_reorder_cost_minor: int
     status: str
 
 
@@ -200,7 +203,8 @@ class SaleRequest(BaseModel):
     product_id: int
     customer_id: Optional[int] = None
     quantity: float = Field(..., gt=0)
-    unit_price: Optional[float] = Field(default=None, ge=0)
+    unit_price_minor: Optional[int] = Field(default=None, ge=0)
+    currency: str = Field(default="MYR", pattern="^[A-Z]{3}$")
     payment_status: str = Field(default="paid", pattern="^(paid|due)$")
     due_date: Optional[str] = Field(default=None, max_length=10)
     reference_note: str = Field(default="", max_length=300)
@@ -211,17 +215,19 @@ class SaleRecord(BaseModel):
     customer_name: Optional[str] = None
     product_name: str
     quantity: float
-    unit_price: float
-    total_amount: float
+    unit_price_minor: int
+    total_amount_minor: int
+    currency: str
     payment_status: str
     due_date: Optional[str] = None
     created_at: str
 
 
 class SalesDashboardResponse(BaseModel):
-    revenue_30d: float
-    cash_collected_30d: float
-    outstanding_amount: float
+    revenue_30d_minor: int
+    cash_collected_30d_minor: int
+    outstanding_amount_minor: int
+    currency: str
     orders_30d: int
     top_customer: Optional[str] = None
     recent_sales: List[SaleRecord]
@@ -237,7 +243,8 @@ class SalesQuestionResponse(BaseModel):
 
 class FinanceTransactionRequest(BaseModel):
     transaction_type: str = Field(..., pattern="^(income|expense)$")
-    amount: float = Field(..., gt=0)
+    amount_minor: int = Field(..., gt=0)
+    currency: str = Field(default="MYR", pattern="^[A-Z]{3}$")
     category: str = Field(default="Other", max_length=100)
     description: str = Field(default="", max_length=300)
     transaction_date: Optional[str] = Field(default=None, max_length=10)
@@ -246,7 +253,8 @@ class FinanceTransactionRequest(BaseModel):
 class FinanceTransactionItem(BaseModel):
     id: int
     transaction_type: str
-    amount: float
+    amount_minor: int
+    currency: str
     category: str
     description: str
     source: str
@@ -254,12 +262,13 @@ class FinanceTransactionItem(BaseModel):
 
 
 class FinanceDashboardResponse(BaseModel):
-    income_30d: float
-    expenses_30d: float
-    net_cash_flow_30d: float
-    cash_balance: float
-    receivables: float
-    expense_breakdown_30d: Dict[str, float]
+    income_30d_minor: int
+    expenses_30d_minor: int
+    net_cash_flow_30d_minor: int
+    cash_balance_minor: int
+    receivables_minor: int
+    currency: str
+    expense_breakdown_30d_minor: Dict[str, int]
     recent_transactions: List[FinanceTransactionItem]
 
 

@@ -35,7 +35,8 @@ from backend.agents.coordinator import run_research
 from backend.agents import followup, inventory as inventory_agent, sales as sales_agent
 from backend.agents import finance_operations as finance_agent
 from backend import jobs
-from backend.db import get_connection
+from backend.db import DEFAULT_ORGANIZATION_ID, get_connection
+from backend.money import multiply_minor
 
 router = APIRouter()
 logger = logging.getLogger("research_api")
@@ -43,6 +44,10 @@ logger = logging.getLogger("research_api")
 
 def get_user_id(request: Request):
     return request.session.get("user_id")
+
+
+def get_organization_id(_request: Request) -> int:
+    return DEFAULT_ORGANIZATION_ID
 
 
 def require_login(request: Request) -> int:
@@ -63,7 +68,7 @@ def _profile_to_context(profile) -> str:
         ("Products / services", profile["products_services"]),
         ("Target customers", profile["target_customers"]),
         ("Main competitors", profile["main_competitors"]),
-        ("Monthly budget", profile["monthly_budget"]),
+        ("Monthly budget (minor units)", profile["monthly_budget_minor"]),
         ("Business goals", profile["business_goals"]),
         ("Business stage", profile["business_stage"]),
     ]
@@ -74,8 +79,12 @@ def _profile_to_context(profile) -> str:
 @router.get("/company/profile", response_model=Optional[CompanyProfileResponse])
 def get_company_profile(request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
-    row = conn.execute("SELECT * FROM company_profiles WHERE user_id = ?", (user_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM company_profiles WHERE user_id = ? AND organization_id = ?",
+        (user_id, organization_id),
+    ).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -83,22 +92,29 @@ def get_company_profile(request: Request):
 @router.put("/company/profile", response_model=CompanyProfileResponse)
 def save_company_profile(body: CompanyProfileRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     values = body.model_dump()
     conn = get_connection()
     conn.execute(
         """INSERT INTO company_profiles
-           (user_id, company_name, industry, country, currency, products_services, target_customers, main_competitors, monthly_budget, business_goals, business_stage)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(user_id) DO UPDATE SET
-             company_name=excluded.company_name, industry=excluded.industry, country=excluded.country,
+           (user_id, organization_id, company_name, industry, country, currency, products_services,
+            target_customers, main_competitors, monthly_budget_minor, business_goals, business_stage,
+            source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual')
+           ON CONFLICT(organization_id, user_id) DO UPDATE SET
+             organization_id=excluded.organization_id, company_name=excluded.company_name,
+             industry=excluded.industry, country=excluded.country,
              currency=excluded.currency, products_services=excluded.products_services,
              target_customers=excluded.target_customers, main_competitors=excluded.main_competitors,
-             monthly_budget=excluded.monthly_budget, business_goals=excluded.business_goals,
+             monthly_budget_minor=excluded.monthly_budget_minor, business_goals=excluded.business_goals,
              business_stage=excluded.business_stage, updated_at=CURRENT_TIMESTAMP""",
-        (user_id, *values.values()),
+        (user_id, organization_id, *values.values()),
     )
     conn.commit()
-    row = conn.execute("SELECT * FROM company_profiles WHERE user_id = ?", (user_id,)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM company_profiles WHERE user_id = ? AND organization_id = ?",
+        (user_id, organization_id),
+    ).fetchone()
     conn.close()
     return dict(row)
 
@@ -114,6 +130,7 @@ def _looks_numeric_column(name: str) -> bool:
 @router.post("/company/data/quality", response_model=DataQualityResponse)
 async def check_data_quality(request: Request, file: UploadFile = File(...), data_type: str = Form("Business data")):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     filename = file.filename or "upload"
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if extension not in {"csv", "xlsx"}:
@@ -148,13 +165,23 @@ async def check_data_quality(request: Request, file: UploadFile = File(...), dat
                 except ValueError:
                     invalid_numeric_values += 1
     warnings = []
-    if missing_values: warnings.append(f"{missing_values} missing value(s) found.")
-    if duplicate_rows: warnings.append(f"{duplicate_rows} duplicate row(s) found.")
-    if invalid_numeric_values: warnings.append(f"{invalid_numeric_values} value(s) in numeric-looking columns could not be read as numbers.")
-    if not warnings: warnings.append("No common data-quality issues were found in this file.")
+    if missing_values:
+        warnings.append(f"{missing_values} missing value(s) found.")
+    if duplicate_rows:
+        warnings.append(f"{duplicate_rows} duplicate row(s) found.")
+    if invalid_numeric_values:
+        warnings.append(f"{invalid_numeric_values} value(s) in numeric-looking columns could not be read as numbers.")
+    if not warnings:
+        warnings.append("No common data-quality issues were found in this file.")
     result = DataQualityResponse(filename=filename, data_type=data_type, row_count=len(data_rows), column_count=len(columns), columns=columns, missing_values=missing_values, duplicate_rows=duplicate_rows, invalid_numeric_values=invalid_numeric_values, warnings=warnings)
     conn = get_connection()
-    conn.execute("INSERT INTO data_uploads (user_id, filename, data_type, row_count, column_count, quality_summary) VALUES (?, ?, ?, ?, ?, ?)", (user_id, filename, data_type, result.row_count, result.column_count, json.dumps(result.model_dump())))
+    conn.execute(
+        """INSERT INTO data_uploads
+           (user_id, organization_id, filename, data_type, row_count, column_count, quality_summary, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'csv_import')""",
+        (user_id, organization_id, filename, data_type, result.row_count, result.column_count,
+         json.dumps(result.model_dump())),
+    )
     conn.commit()
     conn.close()
     return result
@@ -163,10 +190,14 @@ async def check_data_quality(request: Request, file: UploadFile = File(...), dat
 @router.post("/inventory/suppliers")
 def create_supplier(body: SupplierRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.execute(
-        "INSERT INTO suppliers (user_id, name, contact_name, email, phone, lead_time_days, payment_terms) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (user_id, body.name, body.contact_name, body.email, body.phone, body.lead_time_days, body.payment_terms),
+        """INSERT INTO suppliers
+           (user_id, organization_id, name, contact_name, email, phone, lead_time_days, payment_terms, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual')""",
+        (user_id, organization_id, body.name, body.contact_name, body.email, body.phone,
+         body.lead_time_days, body.payment_terms),
     )
     conn.commit()
     supplier_id = cursor.lastrowid
@@ -177,11 +208,12 @@ def create_supplier(body: SupplierRequest, request: Request):
 @router.get("/inventory/suppliers", response_model=list[SupplierItem])
 def list_suppliers(request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     rows = conn.execute(
         """SELECT id, name, contact_name, email, phone, lead_time_days, payment_terms
-           FROM suppliers WHERE user_id = ? ORDER BY name COLLATE NOCASE""",
-        (user_id,),
+           FROM suppliers WHERE user_id = ? AND organization_id = ? ORDER BY name COLLATE NOCASE""",
+        (user_id, organization_id),
     ).fetchall()
     conn.close()
     return [SupplierItem(**dict(row)) for row in rows]
@@ -190,17 +222,25 @@ def list_suppliers(request: Request):
 @router.post("/inventory/products")
 def create_product(body: ProductRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     if body.supplier_id is not None:
-        supplier = conn.execute("SELECT id FROM suppliers WHERE id = ? AND user_id = ?", (body.supplier_id, user_id)).fetchone()
+        supplier = conn.execute(
+            "SELECT id FROM suppliers WHERE id = ? AND user_id = ? AND organization_id = ?",
+            (body.supplier_id, user_id, organization_id),
+        ).fetchone()
         if supplier is None:
             conn.close()
             raise HTTPException(status_code=404, detail="Supplier not found")
     try:
         cursor = conn.execute(
-            """INSERT INTO products (user_id, supplier_id, sku, name, category, unit_cost, selling_price, reorder_point, lead_time_days)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (user_id, body.supplier_id, body.sku, body.name, body.category, body.unit_cost, body.selling_price, body.reorder_point, body.lead_time_days),
+            """INSERT INTO products
+               (user_id, organization_id, supplier_id, sku, name, category, unit_cost_minor,
+                selling_price_minor, currency, reorder_point, lead_time_days, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual')""",
+            (user_id, organization_id, body.supplier_id, body.sku, body.name, body.category,
+             body.unit_cost_minor, body.selling_price_minor, body.currency, body.reorder_point,
+             body.lead_time_days),
         )
         conn.commit()
         product_id = cursor.lastrowid
@@ -216,20 +256,32 @@ def create_product(body: ProductRequest, request: Request):
 @router.post("/inventory/products/{product_id}/movement")
 def record_stock_movement(product_id: int, body: StockMovementRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
-    product = conn.execute("SELECT id FROM products WHERE id = ? AND user_id = ?", (product_id, user_id)).fetchone()
+    product = conn.execute(
+        "SELECT id, currency FROM products WHERE id = ? AND user_id = ? AND organization_id = ?",
+        (product_id, user_id, organization_id),
+    ).fetchone()
     if product is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Product not found")
     direction = 1 if body.transaction_type in {"received", "adjustment"} else -1
     quantity_change = body.quantity * direction
-    current_stock = conn.execute("SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_transactions WHERE product_id = ?", (product_id,)).fetchone()[0]
+    current_stock = conn.execute(
+        """SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_transactions
+           WHERE product_id = ? AND organization_id = ?""",
+        (product_id, organization_id),
+    ).fetchone()[0]
     if current_stock + quantity_change < 0:
         conn.close()
         raise HTTPException(status_code=400, detail=f"Not enough stock. Current stock is {current_stock}.")
     cursor = conn.execute(
-        "INSERT INTO inventory_transactions (product_id, user_id, transaction_type, quantity_change, unit_cost, reference_note) VALUES (?, ?, ?, ?, ?, ?)",
-        (product_id, user_id, body.transaction_type, quantity_change, body.unit_cost, body.reference_note),
+        """INSERT INTO inventory_transactions
+           (product_id, user_id, organization_id, transaction_type, quantity_change,
+            unit_cost_minor, currency, reference_note, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual')""",
+        (product_id, user_id, organization_id, body.transaction_type, quantity_change,
+         body.unit_cost_minor, product["currency"], body.reference_note),
     )
     conn.commit()
     conn.close()
@@ -239,6 +291,7 @@ def record_stock_movement(product_id: int, body: StockMovementRequest, request: 
 @router.get("/inventory/dashboard", response_model=list[InventoryItem])
 def inventory_dashboard(request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     rows = conn.execute(
         """SELECT p.*, s.name AS supplier_name,
@@ -248,12 +301,12 @@ def inventory_dashboard(request: Request):
                        AND t.created_at >= datetime('now', '-30 days')
                       THEN ABS(t.quantity_change) ELSE 0 END), 0) AS units_sold_30d
            FROM products p
-           LEFT JOIN suppliers s ON s.id = p.supplier_id
-           LEFT JOIN inventory_transactions t ON t.product_id = p.id
-           WHERE p.user_id = ? AND p.active = 1
+           LEFT JOIN suppliers s ON s.id = p.supplier_id AND s.organization_id = p.organization_id
+           LEFT JOIN inventory_transactions t ON t.product_id = p.id AND t.organization_id = p.organization_id
+           WHERE p.user_id = ? AND p.organization_id = ? AND p.active = 1
            GROUP BY p.id
            ORDER BY current_stock <= p.reorder_point DESC, p.name ASC""",
-        (user_id,),
+        (user_id, organization_id),
     ).fetchall()
     conn.close()
     result = []
@@ -280,12 +333,14 @@ def inventory_dashboard(request: Request):
             status = "Healthy"
         result.append(InventoryItem(
             id=row["id"], sku=row["sku"] or "", name=row["name"], category=row["category"] or "",
-            current_stock=stock, unit_cost=row["unit_cost"], selling_price=row["selling_price"],
-            inventory_value=round(stock * row["unit_cost"], 2), reorder_point=reorder_point,
+            current_stock=stock, unit_cost_minor=row["unit_cost_minor"],
+            selling_price_minor=row["selling_price_minor"],
+            inventory_value_minor=multiply_minor(row["unit_cost_minor"], stock), currency=row["currency"],
+            reorder_point=reorder_point,
             lead_time_days=lead_time_days, supplier_name=row["supplier_name"],
             units_sold_30d=round(units_sold_30d, 2), average_daily_sales=round(average_daily_sales, 2),
             days_of_stock=days_of_stock, recommended_reorder_quantity=recommended_reorder_quantity,
-            estimated_reorder_cost=round(recommended_reorder_quantity * float(row["unit_cost"]), 2),
+            estimated_reorder_cost_minor=row["unit_cost_minor"] * recommended_reorder_quantity,
             status=status,
         ))
     return result
@@ -294,13 +349,14 @@ def inventory_dashboard(request: Request):
 @router.post("/inventory/ask", response_model=InventoryQuestionResponse)
 def ask_inventory_agent(body: InventoryQuestionRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     items = inventory_dashboard(request)
     conn = get_connection()
     profile = conn.execute(
         """SELECT company_name, industry, country, currency, products_services,
                   target_customers, business_goals, business_stage
-           FROM company_profiles WHERE user_id = ?""",
-        (user_id,),
+           FROM company_profiles WHERE user_id = ? AND organization_id = ?""",
+        (user_id, organization_id),
     ).fetchone()
     conn.close()
     company_profile = dict(profile) if profile else {"currency": "MYR"}
@@ -319,11 +375,12 @@ def ask_inventory_agent(body: InventoryQuestionRequest, request: Request):
 @router.post("/sales/customers")
 def create_customer(body: CustomerRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.execute(
-        """INSERT INTO customers (user_id, name, email, phone, segment, notes)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (user_id, body.name, body.email, body.phone, body.segment, body.notes),
+        """INSERT INTO customers (user_id, organization_id, name, email, phone, segment, notes, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'manual')""",
+        (user_id, organization_id, body.name, body.email, body.phone, body.segment, body.notes),
     )
     conn.commit()
     customer_id = cursor.lastrowid
@@ -334,11 +391,12 @@ def create_customer(body: CustomerRequest, request: Request):
 @router.get("/sales/customers", response_model=list[CustomerItem])
 def list_customers(request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     rows = conn.execute(
         """SELECT id, name, email, phone, segment, notes
-           FROM customers WHERE user_id = ? ORDER BY name COLLATE NOCASE""",
-        (user_id,),
+           FROM customers WHERE user_id = ? AND organization_id = ? ORDER BY name COLLATE NOCASE""",
+        (user_id, organization_id),
     ).fetchall()
     conn.close()
     return [CustomerItem(**dict(row)) for row in rows]
@@ -347,10 +405,12 @@ def list_customers(request: Request):
 @router.post("/sales/orders", response_model=SaleRecord)
 def record_sale(body: SaleRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     product = conn.execute(
-        "SELECT id, name, selling_price FROM products WHERE id = ? AND user_id = ? AND active = 1",
-        (body.product_id, user_id),
+        """SELECT id, name, selling_price_minor, currency FROM products
+           WHERE id = ? AND user_id = ? AND organization_id = ? AND active = 1""",
+        (body.product_id, user_id, organization_id),
     ).fetchone()
     if product is None:
         conn.close()
@@ -358,8 +418,8 @@ def record_sale(body: SaleRequest, request: Request):
     customer_name = None
     if body.customer_id is not None:
         customer = conn.execute(
-            "SELECT id, name FROM customers WHERE id = ? AND user_id = ?",
-            (body.customer_id, user_id),
+            "SELECT id, name FROM customers WHERE id = ? AND user_id = ? AND organization_id = ?",
+            (body.customer_id, user_id, organization_id),
         ).fetchone()
         if customer is None:
             conn.close()
@@ -372,42 +432,56 @@ def record_sale(body: SaleRequest, request: Request):
             conn.close()
             raise HTTPException(status_code=400, detail="Due date must use YYYY-MM-DD format.")
     current_stock = float(conn.execute(
-        "SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_transactions WHERE product_id = ?",
-        (body.product_id,),
+        """SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_transactions
+           WHERE product_id = ? AND organization_id = ?""",
+        (body.product_id, organization_id),
     ).fetchone()[0])
     if body.quantity > current_stock:
         conn.close()
         raise HTTPException(status_code=400, detail=f"Not enough stock. Current stock is {current_stock}.")
-    unit_price = float(body.unit_price if body.unit_price is not None else product["selling_price"])
-    total_amount = round(body.quantity * unit_price, 2)
+    if body.currency != product["currency"]:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Sale currency must match the product currency.")
+    unit_price_minor = body.unit_price_minor if body.unit_price_minor is not None else product["selling_price_minor"]
+    total_amount_minor = multiply_minor(unit_price_minor, body.quantity)
     cursor = conn.execute(
         """INSERT INTO sales_orders
-           (user_id, customer_id, product_id, quantity, unit_price, total_amount, payment_status, due_date, reference_note)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (user_id, body.customer_id, body.product_id, body.quantity, unit_price, total_amount,
-         body.payment_status, body.due_date or None, body.reference_note),
+           (user_id, organization_id, customer_id, product_id, quantity, unit_price_minor,
+            total_amount_minor, currency, payment_status, due_date, reference_note, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual')""",
+        (user_id, organization_id, body.customer_id, body.product_id, body.quantity, unit_price_minor,
+         total_amount_minor, product["currency"], body.payment_status, body.due_date or None,
+         body.reference_note),
     )
     sale_id = cursor.lastrowid
     conn.execute(
         """INSERT INTO inventory_transactions
-           (product_id, user_id, transaction_type, quantity_change, unit_cost, reference_note)
-           VALUES (?, ?, 'sold', ?, NULL, ?)""",
-        (body.product_id, user_id, -body.quantity, f"Sale #{sale_id}: {body.reference_note}".strip()),
+           (product_id, user_id, organization_id, transaction_type, quantity_change,
+            unit_cost_minor, currency, reference_note, source, external_id)
+           VALUES (?, ?, ?, 'sold', ?, NULL, ?, ?, 'sale', ?)""",
+        (body.product_id, user_id, organization_id, -body.quantity, product["currency"],
+         f"Sale #{sale_id}: {body.reference_note}".strip(), str(sale_id)),
     )
     if body.payment_status == "paid":
         conn.execute(
             """INSERT OR IGNORE INTO finance_transactions
-               (user_id, transaction_type, amount, category, description, source, related_sale_id, transaction_date)
-               VALUES (?, 'income', ?, 'Sales Revenue', ?, 'sale', ?, date('now'))""",
-            (user_id, total_amount, f"Payment received for sale #{sale_id}", sale_id),
+               (user_id, organization_id, transaction_type, amount_minor, currency, category,
+                description, source, external_id, related_sale_id, transaction_date)
+               VALUES (?, ?, 'income', ?, ?, 'Sales Revenue', ?, 'sale', ?, ?, date('now'))""",
+            (user_id, organization_id, total_amount_minor, product["currency"],
+             f"Payment received for sale #{sale_id}", str(sale_id), sale_id),
         )
     conn.commit()
-    row = conn.execute("SELECT created_at FROM sales_orders WHERE id = ?", (sale_id,)).fetchone()
+    row = conn.execute(
+        "SELECT created_at FROM sales_orders WHERE id = ? AND organization_id = ?",
+        (sale_id, organization_id),
+    ).fetchone()
     conn.close()
     effective_status = "overdue" if body.payment_status == "due" and body.due_date and body.due_date < datetime.now().strftime("%Y-%m-%d") else body.payment_status
     return SaleRecord(
         id=sale_id, customer_name=customer_name, product_name=product["name"], quantity=body.quantity,
-        unit_price=unit_price, total_amount=total_amount, payment_status=effective_status,
+        unit_price_minor=unit_price_minor, total_amount_minor=total_amount_minor,
+        currency=product["currency"], payment_status=effective_status,
         due_date=body.due_date, created_at=row["created_at"],
     )
 
@@ -415,21 +489,28 @@ def record_sale(body: SaleRequest, request: Request):
 @router.post("/sales/orders/{sale_id}/mark-paid")
 def mark_sale_paid(sale_id: int, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     sale = conn.execute(
-        "SELECT id, total_amount, payment_status FROM sales_orders WHERE id = ? AND user_id = ?",
-        (sale_id, user_id),
+        """SELECT id, total_amount_minor, currency, payment_status FROM sales_orders
+           WHERE id = ? AND user_id = ? AND organization_id = ?""",
+        (sale_id, user_id, organization_id),
     ).fetchone()
     if sale is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Sale not found.")
     if sale["payment_status"] != "paid":
-        conn.execute("UPDATE sales_orders SET payment_status = 'paid' WHERE id = ?", (sale_id,))
+        conn.execute(
+            "UPDATE sales_orders SET payment_status = 'paid' WHERE id = ? AND organization_id = ?",
+            (sale_id, organization_id),
+        )
         conn.execute(
             """INSERT OR IGNORE INTO finance_transactions
-               (user_id, transaction_type, amount, category, description, source, related_sale_id, transaction_date)
-               VALUES (?, 'income', ?, 'Sales Revenue', ?, 'sale', ?, date('now'))""",
-            (user_id, float(sale["total_amount"]), f"Payment received for sale #{sale_id}", sale_id),
+               (user_id, organization_id, transaction_type, amount_minor, currency, category,
+                description, source, external_id, related_sale_id, transaction_date)
+               VALUES (?, ?, 'income', ?, ?, 'Sales Revenue', ?, 'sale', ?, ?, date('now'))""",
+            (user_id, organization_id, sale["total_amount_minor"], sale["currency"],
+             f"Payment received for sale #{sale_id}", str(sale_id), sale_id),
         )
         conn.commit()
     conn.close()
@@ -439,41 +520,44 @@ def mark_sale_paid(sale_id: int, request: Request):
 @router.get("/sales/dashboard", response_model=SalesDashboardResponse)
 def sales_dashboard(request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     totals = conn.execute(
         """SELECT
-             COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-30 days') THEN total_amount ELSE 0 END), 0) AS revenue_30d,
-             COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-30 days') AND payment_status = 'paid' THEN total_amount ELSE 0 END), 0) AS cash_collected_30d,
-             COALESCE(SUM(CASE WHEN payment_status != 'paid' THEN total_amount ELSE 0 END), 0) AS outstanding_amount,
+             COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-30 days') THEN total_amount_minor ELSE 0 END), 0) AS revenue_30d_minor,
+             COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-30 days') AND payment_status = 'paid' THEN total_amount_minor ELSE 0 END), 0) AS cash_collected_30d_minor,
+             COALESCE(SUM(CASE WHEN payment_status != 'paid' THEN total_amount_minor ELSE 0 END), 0) AS outstanding_amount_minor,
+             COALESCE(MAX(currency), 'MYR') AS currency,
              SUM(CASE WHEN created_at >= datetime('now', '-30 days') THEN 1 ELSE 0 END) AS orders_30d
-           FROM sales_orders WHERE user_id = ?""",
-        (user_id,),
+           FROM sales_orders WHERE user_id = ? AND organization_id = ?""",
+        (user_id, organization_id),
     ).fetchone()
     top_customer_row = conn.execute(
-        """SELECT c.name, SUM(s.total_amount) AS total
-           FROM sales_orders s JOIN customers c ON c.id = s.customer_id
-           WHERE s.user_id = ? AND s.created_at >= datetime('now', '-30 days')
-           GROUP BY c.id ORDER BY total DESC LIMIT 1""",
-        (user_id,),
+        """SELECT c.name, SUM(s.total_amount_minor) AS total_minor
+           FROM sales_orders s JOIN customers c ON c.id = s.customer_id AND c.organization_id = s.organization_id
+           WHERE s.user_id = ? AND s.organization_id = ? AND s.created_at >= datetime('now', '-30 days')
+           GROUP BY c.id ORDER BY total_minor DESC LIMIT 1""",
+        (user_id, organization_id),
     ).fetchone()
     rows = conn.execute(
         """SELECT s.id, c.name AS customer_name, p.name AS product_name, s.quantity,
-                  s.unit_price, s.total_amount,
+                  s.unit_price_minor, s.total_amount_minor, s.currency,
                   CASE WHEN s.payment_status != 'paid' AND s.due_date IS NOT NULL
                          AND date(s.due_date) < date('now') THEN 'overdue'
                        ELSE s.payment_status END AS payment_status,
                   s.due_date, s.created_at
            FROM sales_orders s
-           JOIN products p ON p.id = s.product_id
-           LEFT JOIN customers c ON c.id = s.customer_id
-           WHERE s.user_id = ? ORDER BY s.created_at DESC, s.id DESC LIMIT 20""",
-        (user_id,),
+           JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
+           LEFT JOIN customers c ON c.id = s.customer_id AND c.organization_id = s.organization_id
+           WHERE s.user_id = ? AND s.organization_id = ? ORDER BY s.created_at DESC, s.id DESC LIMIT 20""",
+        (user_id, organization_id),
     ).fetchall()
     conn.close()
     return SalesDashboardResponse(
-        revenue_30d=round(float(totals["revenue_30d"]), 2),
-        cash_collected_30d=round(float(totals["cash_collected_30d"]), 2),
-        outstanding_amount=round(float(totals["outstanding_amount"]), 2),
+        revenue_30d_minor=int(totals["revenue_30d_minor"]),
+        cash_collected_30d_minor=int(totals["cash_collected_30d_minor"]),
+        outstanding_amount_minor=int(totals["outstanding_amount_minor"]),
+        currency=totals["currency"],
         orders_30d=int(totals["orders_30d"] or 0),
         top_customer=top_customer_row["name"] if top_customer_row else None,
         recent_sales=[SaleRecord(**dict(row)) for row in rows],
@@ -483,43 +567,47 @@ def sales_dashboard(request: Request):
 @router.post("/sales/ask", response_model=SalesQuestionResponse)
 def ask_sales_agent(body: SalesQuestionRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     dashboard = sales_dashboard(request)
     conn = get_connection()
     profile = conn.execute(
         """SELECT company_name, industry, country, currency, products_services,
                   target_customers, business_goals, business_stage
-           FROM company_profiles WHERE user_id = ?""",
-        (user_id,),
+           FROM company_profiles WHERE user_id = ? AND organization_id = ?""",
+        (user_id, organization_id),
     ).fetchone()
     customer_performance = conn.execute(
         """SELECT c.id, c.name, c.segment, COUNT(s.id) AS order_count,
-                  COALESCE(SUM(s.total_amount), 0) AS total_revenue,
-                  COALESCE(SUM(CASE WHEN s.payment_status != 'paid' THEN s.total_amount ELSE 0 END), 0) AS outstanding_amount,
+                  COALESCE(SUM(s.total_amount_minor), 0) AS total_revenue_minor,
+                  COALESCE(SUM(CASE WHEN s.payment_status != 'paid' THEN s.total_amount_minor ELSE 0 END), 0) AS outstanding_amount_minor,
                   MAX(s.created_at) AS last_purchase
-           FROM customers c LEFT JOIN sales_orders s ON s.customer_id = c.id
-           WHERE c.user_id = ? GROUP BY c.id
-           ORDER BY total_revenue DESC, c.name COLLATE NOCASE LIMIT 25""",
-        (user_id,),
+           FROM customers c LEFT JOIN sales_orders s
+             ON s.customer_id = c.id AND s.organization_id = c.organization_id
+           WHERE c.user_id = ? AND c.organization_id = ? GROUP BY c.id
+           ORDER BY total_revenue_minor DESC, c.name COLLATE NOCASE LIMIT 25""",
+        (user_id, organization_id),
     ).fetchall()
     product_performance = conn.execute(
         """SELECT p.id, p.name, SUM(s.quantity) AS units_sold,
-                  SUM(s.total_amount) AS revenue
-           FROM sales_orders s JOIN products p ON p.id = s.product_id
-           WHERE s.user_id = ? AND s.created_at >= datetime('now', '-30 days')
-           GROUP BY p.id ORDER BY revenue DESC LIMIT 25""",
-        (user_id,),
+                  SUM(s.total_amount_minor) AS revenue_minor, MAX(s.currency) AS currency
+           FROM sales_orders s JOIN products p
+             ON p.id = s.product_id AND p.organization_id = s.organization_id
+           WHERE s.user_id = ? AND s.organization_id = ?
+             AND s.created_at >= datetime('now', '-30 days')
+           GROUP BY p.id ORDER BY revenue_minor DESC LIMIT 25""",
+        (user_id, organization_id),
     ).fetchall()
     outstanding_invoices = conn.execute(
         """SELECT s.id, c.name AS customer_name, p.name AS product_name,
-                  s.total_amount, s.due_date,
+                  s.total_amount_minor, s.currency, s.due_date,
                   CASE WHEN s.due_date IS NOT NULL AND date(s.due_date) < date('now')
                        THEN 'overdue' ELSE 'due' END AS status
            FROM sales_orders s
-           JOIN products p ON p.id = s.product_id
-           LEFT JOIN customers c ON c.id = s.customer_id
-           WHERE s.user_id = ? AND s.payment_status != 'paid'
+           JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
+           LEFT JOIN customers c ON c.id = s.customer_id AND c.organization_id = s.organization_id
+           WHERE s.user_id = ? AND s.organization_id = ? AND s.payment_status != 'paid'
            ORDER BY COALESCE(s.due_date, '9999-12-31'), s.created_at LIMIT 50""",
-        (user_id,),
+        (user_id, organization_id),
     ).fetchall()
     conn.close()
     sales_context = {
@@ -540,6 +628,7 @@ def ask_sales_agent(body: SalesQuestionRequest, request: Request):
 @router.post("/finance/transactions", response_model=FinanceTransactionItem)
 def create_finance_transaction(body: FinanceTransactionRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     transaction_date = body.transaction_date or datetime.now().strftime("%Y-%m-%d")
     try:
         datetime.strptime(transaction_date, "%Y-%m-%d")
@@ -548,15 +637,18 @@ def create_finance_transaction(body: FinanceTransactionRequest, request: Request
     conn = get_connection()
     cursor = conn.execute(
         """INSERT INTO finance_transactions
-           (user_id, transaction_type, amount, category, description, source, transaction_date)
-           VALUES (?, ?, ?, ?, ?, 'manual', ?)""",
-        (user_id, body.transaction_type, body.amount, body.category, body.description, transaction_date),
+           (user_id, organization_id, transaction_type, amount_minor, currency, category,
+            description, source, transaction_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?)""",
+        (user_id, organization_id, body.transaction_type, body.amount_minor, body.currency,
+         body.category, body.description, transaction_date),
     )
     conn.commit()
     row = conn.execute(
-        """SELECT id, transaction_type, amount, category, description, source, transaction_date
-           FROM finance_transactions WHERE id = ?""",
-        (cursor.lastrowid,),
+        """SELECT id, transaction_type, amount_minor, currency, category, description, source,
+                  transaction_date FROM finance_transactions
+           WHERE id = ? AND organization_id = ?""",
+        (cursor.lastrowid, organization_id),
     ).fetchone()
     conn.close()
     return FinanceTransactionItem(**dict(row))
@@ -565,41 +657,46 @@ def create_finance_transaction(body: FinanceTransactionRequest, request: Request
 @router.get("/finance/dashboard", response_model=FinanceDashboardResponse)
 def finance_dashboard(request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     totals = conn.execute(
         """SELECT
-             COALESCE(SUM(CASE WHEN transaction_type = 'income' AND transaction_date >= date('now', '-30 days') THEN amount ELSE 0 END), 0) AS income_30d,
-             COALESCE(SUM(CASE WHEN transaction_type = 'expense' AND transaction_date >= date('now', '-30 days') THEN amount ELSE 0 END), 0) AS expenses_30d,
-             COALESCE(SUM(CASE WHEN transaction_type = 'income' THEN amount ELSE -amount END), 0) AS cash_balance
-           FROM finance_transactions WHERE user_id = ?""",
-        (user_id,),
+             COALESCE(SUM(CASE WHEN transaction_type = 'income' AND transaction_date >= date('now', '-30 days') THEN amount_minor ELSE 0 END), 0) AS income_30d_minor,
+             COALESCE(SUM(CASE WHEN transaction_type = 'expense' AND transaction_date >= date('now', '-30 days') THEN amount_minor ELSE 0 END), 0) AS expenses_30d_minor,
+             COALESCE(SUM(CASE WHEN transaction_type = 'income' THEN amount_minor ELSE -amount_minor END), 0) AS cash_balance_minor,
+             COALESCE(MAX(currency), 'MYR') AS currency
+           FROM finance_transactions WHERE user_id = ? AND organization_id = ?""",
+        (user_id, organization_id),
     ).fetchone()
     receivables = conn.execute(
-        "SELECT COALESCE(SUM(total_amount), 0) FROM sales_orders WHERE user_id = ? AND payment_status != 'paid'",
-        (user_id,),
+        """SELECT COALESCE(SUM(total_amount_minor), 0) FROM sales_orders
+           WHERE user_id = ? AND organization_id = ? AND payment_status != 'paid'""",
+        (user_id, organization_id),
     ).fetchone()[0]
     categories = conn.execute(
-        """SELECT COALESCE(category, 'Other') AS category, SUM(amount) AS total
+        """SELECT COALESCE(category, 'Other') AS category, SUM(amount_minor) AS total_minor
            FROM finance_transactions
-           WHERE user_id = ? AND transaction_type = 'expense' AND transaction_date >= date('now', '-30 days')
-           GROUP BY category ORDER BY total DESC""",
-        (user_id,),
+           WHERE user_id = ? AND organization_id = ? AND transaction_type = 'expense'
+             AND transaction_date >= date('now', '-30 days')
+           GROUP BY category ORDER BY total_minor DESC""",
+        (user_id, organization_id),
     ).fetchall()
     rows = conn.execute(
-        """SELECT id, transaction_type, amount, COALESCE(category, 'Other') AS category,
+        """SELECT id, transaction_type, amount_minor, currency, COALESCE(category, 'Other') AS category,
                   COALESCE(description, '') AS description, source, transaction_date
-           FROM finance_transactions WHERE user_id = ?
+           FROM finance_transactions WHERE user_id = ? AND organization_id = ?
            ORDER BY transaction_date DESC, id DESC LIMIT 30""",
-        (user_id,),
+        (user_id, organization_id),
     ).fetchall()
     conn.close()
-    income_30d = float(totals["income_30d"])
-    expenses_30d = float(totals["expenses_30d"])
+    income_30d_minor = int(totals["income_30d_minor"])
+    expenses_30d_minor = int(totals["expenses_30d_minor"])
     return FinanceDashboardResponse(
-        income_30d=round(income_30d, 2), expenses_30d=round(expenses_30d, 2),
-        net_cash_flow_30d=round(income_30d - expenses_30d, 2),
-        cash_balance=round(float(totals["cash_balance"]), 2), receivables=round(float(receivables), 2),
-        expense_breakdown_30d={row["category"]: round(float(row["total"]), 2) for row in categories},
+        income_30d_minor=income_30d_minor, expenses_30d_minor=expenses_30d_minor,
+        net_cash_flow_30d_minor=income_30d_minor - expenses_30d_minor,
+        cash_balance_minor=int(totals["cash_balance_minor"]), receivables_minor=int(receivables),
+        currency=totals["currency"],
+        expense_breakdown_30d_minor={row["category"]: int(row["total_minor"]) for row in categories},
         recent_transactions=[FinanceTransactionItem(**dict(row)) for row in rows],
     )
 
@@ -607,55 +704,61 @@ def finance_dashboard(request: Request):
 @router.post("/finance/ask", response_model=FinanceQuestionResponse)
 def ask_finance_agent(body: FinanceQuestionRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     finance = finance_dashboard(request)
     sales = sales_dashboard(request)
     inventory = inventory_dashboard(request)
     conn = get_connection()
     profile = conn.execute(
         """SELECT company_name, industry, country, currency, products_services,
-                  monthly_budget, business_goals, business_stage
-           FROM company_profiles WHERE user_id = ?""",
-        (user_id,),
+                  monthly_budget_minor, business_goals, business_stage
+           FROM company_profiles WHERE user_id = ? AND organization_id = ?""",
+        (user_id, organization_id),
     ).fetchone()
     monthly_cash_flow = conn.execute(
         """SELECT strftime('%Y-%m', transaction_date) AS month,
-                  SUM(CASE WHEN transaction_type = 'income' THEN amount ELSE 0 END) AS income,
-                  SUM(CASE WHEN transaction_type = 'expense' THEN amount ELSE 0 END) AS expenses
+                  SUM(CASE WHEN transaction_type = 'income' THEN amount_minor ELSE 0 END) AS income_minor,
+                  SUM(CASE WHEN transaction_type = 'expense' THEN amount_minor ELSE 0 END) AS expenses_minor,
+                  MAX(currency) AS currency
            FROM finance_transactions
-           WHERE user_id = ? AND transaction_date >= date('now', '-6 months')
+           WHERE user_id = ? AND organization_id = ? AND transaction_date >= date('now', '-6 months')
            GROUP BY month ORDER BY month""",
-        (user_id,),
+        (user_id, organization_id),
     ).fetchall()
     expense_categories = conn.execute(
-        """SELECT COALESCE(category, 'Other') AS category, SUM(amount) AS amount
+        """SELECT COALESCE(category, 'Other') AS category, SUM(amount_minor) AS amount_minor,
+                  MAX(currency) AS currency
            FROM finance_transactions
-           WHERE user_id = ? AND transaction_type = 'expense'
+           WHERE user_id = ? AND organization_id = ? AND transaction_type = 'expense'
              AND transaction_date >= date('now', '-90 days')
-           GROUP BY category ORDER BY amount DESC""",
-        (user_id,),
+           GROUP BY category ORDER BY amount_minor DESC""",
+        (user_id, organization_id),
     ).fetchall()
     outstanding_invoices = conn.execute(
-        """SELECT s.id, c.name AS customer_name, s.total_amount, s.due_date,
+        """SELECT s.id, c.name AS customer_name, s.total_amount_minor, s.currency, s.due_date,
                   CASE WHEN s.due_date IS NOT NULL AND date(s.due_date) < date('now')
                        THEN 'overdue' ELSE 'due' END AS status
-           FROM sales_orders s LEFT JOIN customers c ON c.id = s.customer_id
-           WHERE s.user_id = ? AND s.payment_status != 'paid'
+           FROM sales_orders s LEFT JOIN customers c
+             ON c.id = s.customer_id AND c.organization_id = s.organization_id
+           WHERE s.user_id = ? AND s.organization_id = ? AND s.payment_status != 'paid'
            ORDER BY COALESCE(s.due_date, '9999-12-31') LIMIT 50""",
-        (user_id,),
+        (user_id, organization_id),
     ).fetchall()
     conn.close()
     finance_context = {
         "company_profile": dict(profile) if profile else {"currency": "MYR"},
         "finance_dashboard": finance.model_dump(),
         "sales_summary": {
-            "revenue_30d": sales.revenue_30d,
-            "cash_collected_30d": sales.cash_collected_30d,
-            "outstanding_amount": sales.outstanding_amount,
+            "revenue_30d_minor": sales.revenue_30d_minor,
+            "cash_collected_30d_minor": sales.cash_collected_30d_minor,
+            "outstanding_amount_minor": sales.outstanding_amount_minor,
+            "currency": sales.currency,
             "orders_30d": sales.orders_30d,
         },
         "inventory_commitments": {
-            "current_inventory_value": round(sum(item.inventory_value for item in inventory), 2),
-            "estimated_reorder_cost": round(sum(item.estimated_reorder_cost for item in inventory), 2),
+            "current_inventory_value_minor": sum(item.inventory_value_minor for item in inventory),
+            "estimated_reorder_cost_minor": sum(item.estimated_reorder_cost_minor for item in inventory),
+            "currency": finance.currency,
             "products_needing_attention": sum(item.status != "Healthy" for item in inventory),
         },
         "monthly_cash_flow_last_6_months": [dict(row) for row in monthly_cash_flow],
@@ -677,24 +780,30 @@ def ask_finance_agent(body: FinanceQuestionRequest, request: Request):
 @router.post("/research/start", response_model=StartResponse)
 def start_research(request: Request, body: ResearchRequest) -> StartResponse:
     user_id = get_user_id(request)
+    organization_id = get_organization_id(request)
     research_question = body.question
     if body.use_company_profile:
         if user_id is None:
             raise HTTPException(status_code=401, detail="Log in to use a saved company profile.")
         conn = get_connection()
-        profile = conn.execute("SELECT * FROM company_profiles WHERE user_id = ?", (user_id,)).fetchone()
+        profile = conn.execute(
+            "SELECT * FROM company_profiles WHERE user_id = ? AND organization_id = ?",
+            (user_id, organization_id),
+        ).fetchone()
         conn.close()
         if profile is None:
             raise HTTPException(status_code=400, detail="Create your Company Profile before using it in research.")
         research_question = _profile_to_context(profile) + "\n\nResearch request:\n" + body.question
-    job_id = jobs.create_job(research_question)
+    job_id = jobs.create_job(research_question, organization_id)
 
     if user_id is not None:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO research_jobs (id, user_id, question, report, sections) VALUES (?, ?, ?, ?, ?)",
-            (job_id, user_id, research_question, None, "{}"),
+            """INSERT INTO research_jobs
+               (id, user_id, organization_id, question, report, sections, source)
+               VALUES (?, ?, ?, ?, ?, ?, 'manual')""",
+            (job_id, user_id, organization_id, research_question, None, "{}"),
         )
         conn.commit()
         conn.close()
@@ -703,12 +812,13 @@ def start_research(request: Request, body: ResearchRequest) -> StartResponse:
         try:
             run_research(research_question, job_id, mode=body.mode, depth=body.depth)
             if user_id is not None:
-                job = jobs.get_job(job_id)
+                job = jobs.get_job(job_id, organization_id)
                 conn2 = get_connection()
                 cursor2 = conn2.cursor()
                 cursor2.execute(
-                    "UPDATE research_jobs SET report = ?, sections = ? WHERE id = ?",
-                    (job["report"], json.dumps(job["sections"]), job_id),
+                    """UPDATE research_jobs SET report = ?, sections = ?
+                       WHERE id = ? AND organization_id = ?""",
+                    (job["report"], json.dumps(job["sections"]), job_id, organization_id),
                 )
                 conn2.commit()
                 conn2.close()
@@ -723,8 +833,8 @@ def start_research(request: Request, body: ResearchRequest) -> StartResponse:
 
 
 @router.get("/research/status/{job_id}", response_model=StatusResponse)
-def get_status(job_id: str) -> StatusResponse:
-    job = jobs.get_job(job_id)
+def get_status(job_id: str, request: Request) -> StatusResponse:
+    job = jobs.get_job(job_id, get_organization_id(request))
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -740,11 +850,12 @@ def get_status(job_id: str) -> StatusResponse:
 @router.get("/research/history", response_model=list[HistoryItem])
 def get_history(request: Request, q: str = "", favorites_only: bool = False):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.cursor()
 
-    query = "SELECT id, question, title, favorite, created_at FROM research_jobs WHERE user_id = ?"
-    params = [user_id]
+    query = "SELECT id, question, title, favorite, created_at FROM research_jobs WHERE user_id = ? AND organization_id = ?"
+    params = [user_id, organization_id]
 
     if q:
         query += " AND (question LIKE ? OR title LIKE ?)"
@@ -775,17 +886,22 @@ def get_history(request: Request, q: str = "", favorites_only: bool = False):
 @router.get("/research/job/{job_id}", response_model=JobDetailResponse)
 def get_job_detail(job_id: str, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+    cursor.execute(
+        "SELECT * FROM research_jobs WHERE id = ? AND user_id = ? AND organization_id = ?",
+        (job_id, user_id, organization_id),
+    )
     row = cursor.fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Job not found")
 
     cursor.execute(
-        "SELECT role, content FROM follow_up_messages WHERE job_id = ? ORDER BY created_at ASC",
-        (job_id,),
+        """SELECT role, content FROM follow_up_messages
+           WHERE job_id = ? AND organization_id = ? ORDER BY created_at ASC""",
+        (job_id, organization_id),
     )
     messages = [MessageItem(role=m["role"], content=m["content"]) for m in cursor.fetchall()]
     conn.close()
@@ -806,13 +922,20 @@ def get_job_detail(job_id: str, request: Request):
 @router.put("/research/job/{job_id}/rename")
 def rename_job(job_id: str, body: RenameRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+    cursor.execute(
+        "SELECT id FROM research_jobs WHERE id = ? AND user_id = ? AND organization_id = ?",
+        (job_id, user_id, organization_id),
+    )
     if cursor.fetchone() is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Job not found")
-    cursor.execute("UPDATE research_jobs SET title = ? WHERE id = ?", (body.title, job_id))
+    cursor.execute(
+        "UPDATE research_jobs SET title = ? WHERE id = ? AND organization_id = ?",
+        (body.title, job_id, organization_id),
+    )
     conn.commit()
     conn.close()
     return {"status": "renamed"}
@@ -821,13 +944,20 @@ def rename_job(job_id: str, body: RenameRequest, request: Request):
 @router.put("/research/job/{job_id}/favorite")
 def favorite_job(job_id: str, body: FavoriteRequest, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+    cursor.execute(
+        "SELECT id FROM research_jobs WHERE id = ? AND user_id = ? AND organization_id = ?",
+        (job_id, user_id, organization_id),
+    )
     if cursor.fetchone() is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Job not found")
-    cursor.execute("UPDATE research_jobs SET favorite = ? WHERE id = ?", (1 if body.favorite else 0, job_id))
+    cursor.execute(
+        "UPDATE research_jobs SET favorite = ? WHERE id = ? AND organization_id = ?",
+        (1 if body.favorite else 0, job_id, organization_id),
+    )
     conn.commit()
     conn.close()
     return {"status": "updated"}
@@ -836,14 +966,24 @@ def favorite_job(job_id: str, body: FavoriteRequest, request: Request):
 @router.delete("/research/job/{job_id}")
 def delete_job(job_id: str, request: Request):
     user_id = require_login(request)
+    organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+    cursor.execute(
+        "SELECT id FROM research_jobs WHERE id = ? AND user_id = ? AND organization_id = ?",
+        (job_id, user_id, organization_id),
+    )
     if cursor.fetchone() is None:
         conn.close()
         raise HTTPException(status_code=404, detail="Job not found")
-    cursor.execute("DELETE FROM follow_up_messages WHERE job_id = ?", (job_id,))
-    cursor.execute("DELETE FROM research_jobs WHERE id = ?", (job_id,))
+    cursor.execute(
+        "DELETE FROM follow_up_messages WHERE job_id = ? AND organization_id = ?",
+        (job_id, organization_id),
+    )
+    cursor.execute(
+        "DELETE FROM research_jobs WHERE id = ? AND organization_id = ?",
+        (job_id, organization_id),
+    )
     conn.commit()
     conn.close()
     return {"status": "deleted"}
@@ -859,35 +999,39 @@ def find_opportunities(body: OpportunityRequest):
     return OpportunityResponse(items=[OpportunityItem(**item) for item in items])
 
 
-def _get_report_and_question(job_id: str, user_id):
+def _get_report_and_question(job_id: str, user_id, organization_id: int):
     if user_id is not None:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+        cursor.execute(
+            "SELECT * FROM research_jobs WHERE id = ? AND user_id = ? AND organization_id = ?",
+            (job_id, user_id, organization_id),
+        )
         row = cursor.fetchone()
         conn.close()
         if row is None:
             return None, None
         return row["question"], row["report"]
     else:
-        job = jobs.get_job(job_id)
+        job = jobs.get_job(job_id, organization_id)
         if job is None:
             return None, None
         return job["question"], job["report"]
 
 
-def _get_research_data(job_id: str, user_id):
+def _get_research_data(job_id: str, user_id, organization_id: int):
     if user_id is not None:
         conn = get_connection()
         row = conn.execute(
-            "SELECT question, report, sections FROM research_jobs WHERE id = ? AND user_id = ?",
-            (job_id, user_id),
+            """SELECT question, report, sections FROM research_jobs
+               WHERE id = ? AND user_id = ? AND organization_id = ?""",
+            (job_id, user_id, organization_id),
         ).fetchone()
         conn.close()
         if row is None:
             return None, None, {}
         return row["question"], row["report"], json.loads(row["sections"] or "{}")
-    job = jobs.get_job(job_id)
+    job = jobs.get_job(job_id, organization_id)
     if job is None:
         return None, None, {}
     return job["question"], job["report"], job.get("sections", {})
@@ -911,7 +1055,7 @@ def _safe_report_name(question: str) -> str:
 @router.get("/research/job/{job_id}/pdf")
 def export_pdf(job_id: str, request: Request):
     user_id = get_user_id(request)
-    question, report = _get_report_and_question(job_id, user_id)
+    question, report = _get_report_and_question(job_id, user_id, get_organization_id(request))
 
     if question is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -966,7 +1110,9 @@ def export_pdf(job_id: str, request: Request):
 
 @router.get("/research/job/{job_id}/docx")
 def export_docx(job_id: str, request: Request):
-    question, report, _ = _get_research_data(job_id, get_user_id(request))
+    question, report, _ = _get_research_data(
+        job_id, get_user_id(request), get_organization_id(request)
+    )
     if question is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if not report:
@@ -1015,7 +1161,9 @@ def export_docx(job_id: str, request: Request):
 
 @router.get("/research/job/{job_id}/xlsx")
 def export_xlsx(job_id: str, request: Request):
-    question, report, sections = _get_research_data(job_id, get_user_id(request))
+    question, report, sections = _get_research_data(
+        job_id, get_user_id(request), get_organization_id(request)
+    )
     if question is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if not report:
@@ -1082,25 +1230,30 @@ def export_xlsx(job_id: str, request: Request):
 @router.post("/research/job/{job_id}/message", response_model=FollowUpResponse)
 def send_follow_up(job_id: str, body: FollowUpRequest, request: Request):
     user_id = get_user_id(request)
+    organization_id = get_organization_id(request)
 
     if user_id is not None:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM research_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+        cursor.execute(
+            "SELECT * FROM research_jobs WHERE id = ? AND user_id = ? AND organization_id = ?",
+            (job_id, user_id, organization_id),
+        )
         row = cursor.fetchone()
         if row is None:
             conn.close()
             raise HTTPException(status_code=404, detail="Job not found")
 
         cursor.execute(
-            "SELECT role, content FROM follow_up_messages WHERE job_id = ? ORDER BY created_at ASC",
-            (job_id,),
+            """SELECT role, content FROM follow_up_messages
+               WHERE job_id = ? AND organization_id = ? ORDER BY created_at ASC""",
+            (job_id, organization_id),
         )
         history = [{"role": m["role"], "content": m["content"]} for m in cursor.fetchall()]
         question = row["question"]
         report = row["report"] or ""
     else:
-        job = jobs.get_job(job_id)
+        job = jobs.get_job(job_id, organization_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
         history = job["messages"]
@@ -1122,12 +1275,14 @@ def send_follow_up(job_id: str, body: FollowUpRequest, request: Request):
 
     if user_id is not None:
         cursor.execute(
-            "INSERT INTO follow_up_messages (job_id, role, content) VALUES (?, ?, ?)",
-            (job_id, "user", body.message),
+            """INSERT INTO follow_up_messages
+               (job_id, organization_id, role, content, source) VALUES (?, ?, ?, ?, 'manual')""",
+            (job_id, organization_id, "user", body.message),
         )
         cursor.execute(
-            "INSERT INTO follow_up_messages (job_id, role, content) VALUES (?, ?, ?)",
-            (job_id, "assistant", reply),
+            """INSERT INTO follow_up_messages
+               (job_id, organization_id, role, content, source) VALUES (?, ?, ?, ?, 'manual')""",
+            (job_id, organization_id, "assistant", reply),
         )
         conn.commit()
         conn.close()

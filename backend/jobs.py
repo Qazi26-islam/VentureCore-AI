@@ -5,10 +5,11 @@ _jobs: dict[str, dict] = {}
 _lock = threading.Lock()
 
 
-def create_job(question: str = "") -> str:
+def create_job(question: str = "", organization_id: int = 1) -> str:
     job_id = str(uuid.uuid4())
     with _lock:
         _jobs[job_id] = {
+            "organization_id": organization_id,
             "question": question,
             "status": "running",
             "stage": "starting",
@@ -47,9 +48,12 @@ def fail_job(job_id: str, error: str) -> None:
             _jobs[job_id]["error"] = error
 
 
-def get_job(job_id: str):
+def get_job(job_id: str, organization_id: int = 1):
     with _lock:
-        return _jobs.get(job_id)
+        job = _jobs.get(job_id)
+        if job is None or job["organization_id"] != organization_id:
+            return None
+        return job
 
 
 def add_message(job_id: str, role: str, content: str) -> None:

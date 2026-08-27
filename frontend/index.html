@@ -842,7 +842,7 @@ const financeTableBody = document.getElementById("financeTableBody");
 const financeQuestion = document.getElementById("financeQuestion");
 const financeAskBtn = document.getElementById("financeAskBtn");
 const financeAiAnswer = document.getElementById("financeAiAnswer");
-const productFields = { name: document.getElementById("productName"), sku: document.getElementById("productSku"), category: document.getElementById("productCategory"), unit_cost: document.getElementById("productCost"), selling_price: document.getElementById("productPrice"), reorder_point: document.getElementById("productReorder"), lead_time_days: document.getElementById("productLeadTime") };
+const productFields = { name: document.getElementById("productName"), sku: document.getElementById("productSku"), category: document.getElementById("productCategory"), unit_cost_minor: document.getElementById("productCost"), selling_price_minor: document.getElementById("productPrice"), reorder_point: document.getElementById("productReorder"), lead_time_days: document.getElementById("productLeadTime") };
 const historyList = document.getElementById("historyList");
 const historySearch = document.getElementById("historySearch");
 const favFilterBtn = document.getElementById("favFilterBtn");
@@ -851,9 +851,10 @@ const companyFields = {
   company_name: document.getElementById("companyName"), industry: document.getElementById("companyIndustry"),
   country: document.getElementById("companyCountry"), currency: document.getElementById("companyCurrency"),
   products_services: document.getElementById("companyProducts"), target_customers: document.getElementById("companyCustomers"),
-  main_competitors: document.getElementById("companyCompetitors"), monthly_budget: document.getElementById("companyBudget"),
+  main_competitors: document.getElementById("companyCompetitors"), monthly_budget_minor: document.getElementById("companyBudget"),
   business_goals: document.getElementById("companyGoals"), business_stage: document.getElementById("companyStage")
 };
+let workspaceCurrency = "MYR";
 
 const STAGE_ORDER = ["market_research", "competitor_analysis", "financial_analysis", "synthesis"];
 const STAGE_LABELS = { market_research: "Market Research", competitor_analysis: "Competitor Analysis", financial_analysis: "Financial Analysis", synthesis: "Synthesis" };
@@ -953,7 +954,12 @@ async function openCompanyProfile() {
   const res = await fetch("/company/profile");
   if (res.ok) {
     const profile = await res.json();
-    if (profile) Object.entries(companyFields).forEach(([key, field]) => { field.value = profile[key] || ""; });
+    if (profile) {
+      workspaceCurrency = profile.currency || "MYR";
+      Object.entries(companyFields).forEach(([key, field]) => {
+        field.value = key === "monthly_budget_minor" ? minorToInput(profile[key], workspaceCurrency) : (profile[key] || "");
+      });
+    }
   }
   companyModalOverlay.classList.add("visible");
 }
@@ -963,6 +969,8 @@ companyCancelBtn.addEventListener("click", () => companyModalOverlay.classList.r
 companyModalOverlay.addEventListener("click", event => { if (event.target === companyModalOverlay) companyModalOverlay.classList.remove("visible"); });
 companySaveBtn.addEventListener("click", async () => {
   const payload = Object.fromEntries(Object.entries(companyFields).map(([key, field]) => [key, field.value.trim()]));
+  payload.currency = (payload.currency || "MYR").toUpperCase();
+  payload.monthly_budget_minor = payload.monthly_budget_minor === "" ? null : majorInputToMinor(payload.monthly_budget_minor, payload.currency);
   if (!payload.company_name) { alert("Please enter your company name."); return; }
   companySaveBtn.disabled = true;
   const res = await fetch("/company/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -996,7 +1004,26 @@ dataCheckBtn.addEventListener("click", async () => {
   qualityResult.style.display = "block";
 });
 
-function currency(value) { return new Intl.NumberFormat(undefined, { style:"currency", currency:"MYR", maximumFractionDigits:2 }).format(value || 0); }
+function minorExponent(currencyCode) {
+  if (["BIF","CLP","DJF","GNF","ISK","JPY","KMF","KRW","PYG","RWF","UGX","UYI","VND","VUV","XAF","XOF","XPF"].includes(currencyCode)) return 0;
+  if (["BHD","IQD","JOD","KWD","LYD","OMR","TND"].includes(currencyCode)) return 3;
+  if (["CLF","UYW"].includes(currencyCode)) return 4;
+  return 2;
+}
+function minorScale(currencyCode) { return 10 ** minorExponent(currencyCode || "MYR"); }
+function majorInputToMinor(value, currencyCode) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return NaN;
+  return Math.round((amount + Number.EPSILON * Math.sign(amount)) * minorScale(currencyCode));
+}
+function minorToInput(value, currencyCode) {
+  if (value === null || value === undefined || value === "") return "";
+  return (Number(value) / minorScale(currencyCode)).toFixed(minorExponent(currencyCode));
+}
+function currency(valueMinor, currencyCode = workspaceCurrency) {
+  const exponent = minorExponent(currencyCode);
+  return new Intl.NumberFormat(undefined, { style:"currency", currency:currencyCode, minimumFractionDigits:exponent, maximumFractionDigits:exponent }).format((valueMinor || 0) / minorScale(currencyCode));
+}
 function escapeHtml(value) { const holder = document.createElement("div"); holder.textContent = String(value ?? ""); return holder.innerHTML; }
 
 async function loadSuppliers() {
@@ -1011,18 +1038,19 @@ async function loadInventory() {
   const res = await fetch("/inventory/dashboard");
   if (!res.ok) { inventoryTableBody.innerHTML = '<tr><td colspan="7">Could not load inventory.</td></tr>'; return; }
   const items = await res.json();
-  const totalValue = items.reduce((sum, item) => sum + item.inventory_value, 0);
+  if (items.length) workspaceCurrency = items[0].currency || workspaceCurrency;
+  const totalValue = items.reduce((sum, item) => sum + item.inventory_value_minor, 0);
   const reorderCount = items.filter(item => item.status !== "Healthy").length;
-  const reorderCost = items.reduce((sum, item) => sum + item.estimated_reorder_cost, 0);
-  inventorySummary.innerHTML = '<div class="inventory-stat"><span>Products</span><strong>' + items.length + '</strong></div><div class="inventory-stat"><span>Inventory value</span><strong>' + currency(totalValue) + '</strong></div><div class="inventory-stat"><span>Needs attention</span><strong>' + reorderCount + '</strong></div><div class="inventory-stat"><span>Estimated reorder cost</span><strong>' + currency(reorderCost) + '</strong></div>';
+  const reorderCost = items.reduce((sum, item) => sum + item.estimated_reorder_cost_minor, 0);
+  inventorySummary.innerHTML = '<div class="inventory-stat"><span>Products</span><strong>' + items.length + '</strong></div><div class="inventory-stat"><span>Inventory value</span><strong>' + currency(totalValue, workspaceCurrency) + '</strong></div><div class="inventory-stat"><span>Needs attention</span><strong>' + reorderCount + '</strong></div><div class="inventory-stat"><span>Estimated reorder cost</span><strong>' + currency(reorderCost, workspaceCurrency) + '</strong></div>';
   inventoryTableBody.innerHTML = "";
   if (!items.length) { inventoryTableBody.innerHTML = '<tr><td colspan="7">No products yet. Add your first product above.</td></tr>'; return; }
   items.forEach(item => {
     const statusClass = item.status === "Healthy" ? "healthy" : item.status === "Out of stock" ? "out" : "reorder";
     const daysLeft = item.days_of_stock === null ? "No sales data" : item.days_of_stock + " days";
-    const recommendation = item.recommended_reorder_quantity > 0 ? '<strong>' + item.recommended_reorder_quantity + ' units</strong><br><span>' + currency(item.estimated_reorder_cost) + '</span>' : '<span>Not needed</span>';
+    const recommendation = item.recommended_reorder_quantity > 0 ? '<strong>' + item.recommended_reorder_quantity + ' units</strong><br><span>' + currency(item.estimated_reorder_cost_minor, item.currency) + '</span>' : '<span>Not needed</span>';
     const row = document.createElement("tr");
-    row.innerHTML = '<td><strong>' + escapeHtml(item.name) + '</strong><br><span style="color:var(--muted)">' + escapeHtml(item.sku || item.category || "No SKU") + (item.supplier_name ? ' · ' + escapeHtml(item.supplier_name) : '') + '</span></td><td><strong>' + item.current_stock + '</strong><br><span style="color:var(--muted)">' + currency(item.inventory_value) + '</span></td><td>' + item.average_daily_sales + '</td><td>' + daysLeft + '</td><td class="reorder-cell">' + recommendation + '</td><td><span class="stock-status ' + statusClass + '">' + escapeHtml(item.status) + '</span></td><td></td>';
+    row.innerHTML = '<td><strong>' + escapeHtml(item.name) + '</strong><br><span style="color:var(--muted)">' + escapeHtml(item.sku || item.category || "No SKU") + (item.supplier_name ? ' · ' + escapeHtml(item.supplier_name) : '') + '</span></td><td><strong>' + item.current_stock + '</strong><br><span style="color:var(--muted)">' + currency(item.inventory_value_minor, item.currency) + '</span></td><td>' + item.average_daily_sales + '</td><td>' + daysLeft + '</td><td class="reorder-cell">' + recommendation + '</td><td><span class="stock-status ' + statusClass + '">' + escapeHtml(item.status) + '</span></td><td></td>';
     const actions = row.querySelector("td:last-child");
     [["+ Receive", "received"], ["− Sold", "sold"], ["Damage", "damaged"]].forEach(([label, type]) => { const button = document.createElement("button"); button.className = "stock-action"; button.textContent = label; button.addEventListener("click", () => recordStockMovement(item, type)); actions.appendChild(button); });
     inventoryTableBody.appendChild(row);
@@ -1074,6 +1102,9 @@ productSupplier.addEventListener("change", () => {
 });
 productAddBtn.addEventListener("click", async () => {
   const payload = Object.fromEntries(Object.entries(productFields).map(([key, field]) => [key, key === "name" || key === "sku" || key === "category" ? field.value.trim() : Number(field.value || 0)]));
+  payload.unit_cost_minor = majorInputToMinor(productFields.unit_cost_minor.value || "0", workspaceCurrency);
+  payload.selling_price_minor = majorInputToMinor(productFields.selling_price_minor.value || "0", workspaceCurrency);
+  payload.currency = workspaceCurrency;
   payload.supplier_id = productSupplier.value ? Number(productSupplier.value) : null;
   if (!payload.name) { alert("Enter a product name."); return; }
   productAddBtn.disabled = true;
@@ -1098,9 +1129,10 @@ async function loadSalesWorkspace() {
   const dashboard = await dashboardRes.json();
   saleCustomer.innerHTML = '<option value="">Walk-in / no customer</option>' + customers.map(customer => '<option value="' + customer.id + '">' + escapeHtml(customer.name) + '</option>').join("");
   customerList.innerHTML = customers.length ? customers.map(customer => '<span class="supplier-chip"><strong>' + escapeHtml(customer.name) + '</strong>' + (customer.segment ? ' · ' + escapeHtml(customer.segment) : '') + '</span>').join("") : '<span class="supplier-chip">No customers yet</span>';
-  saleProduct.innerHTML = '<option value="">Choose product</option>' + products.map(product => '<option value="' + product.id + '" data-price="' + product.selling_price + '">' + escapeHtml(product.name) + ' · ' + product.current_stock + ' in stock</option>').join("");
-  salesSummary.innerHTML = '<div class="inventory-stat"><span>30-day revenue</span><strong>' + currency(dashboard.revenue_30d) + '</strong></div><div class="inventory-stat"><span>Cash collected</span><strong>' + currency(dashboard.cash_collected_30d) + '</strong></div><div class="inventory-stat"><span>Outstanding</span><strong>' + currency(dashboard.outstanding_amount) + '</strong></div><div class="inventory-stat"><span>Orders</span><strong>' + dashboard.orders_30d + '</strong></div><div class="inventory-stat"><span>Top customer</span><strong>' + escapeHtml(dashboard.top_customer || "Not enough data") + '</strong></div>';
-  salesTableBody.innerHTML = dashboard.recent_sales.length ? dashboard.recent_sales.map(sale => '<tr><td>' + escapeHtml(sale.created_at.slice(0, 10)) + '</td><td>' + escapeHtml(sale.customer_name || "Walk-in") + '</td><td>' + escapeHtml(sale.product_name) + '</td><td>' + sale.quantity + '</td><td>' + currency(sale.total_amount) + '</td><td><span class="payment-status ' + sale.payment_status + '">' + escapeHtml(sale.payment_status) + '</span></td><td>' + (sale.payment_status === "paid" ? '<span style="color:var(--muted)">—</span>' : '<button class="stock-action mark-paid-btn" data-sale-id="' + sale.id + '">Mark paid</button>') + '</td></tr>').join("") : '<tr><td colspan="7">No sales recorded yet.</td></tr>';
+  workspaceCurrency = dashboard.currency || workspaceCurrency;
+  saleProduct.innerHTML = '<option value="">Choose product</option>' + products.map(product => '<option value="' + product.id + '" data-price-minor="' + product.selling_price_minor + '" data-currency="' + product.currency + '">' + escapeHtml(product.name) + ' · ' + product.current_stock + ' in stock</option>').join("");
+  salesSummary.innerHTML = '<div class="inventory-stat"><span>30-day revenue</span><strong>' + currency(dashboard.revenue_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Cash collected</span><strong>' + currency(dashboard.cash_collected_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Outstanding</span><strong>' + currency(dashboard.outstanding_amount_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Orders</span><strong>' + dashboard.orders_30d + '</strong></div><div class="inventory-stat"><span>Top customer</span><strong>' + escapeHtml(dashboard.top_customer || "Not enough data") + '</strong></div>';
+  salesTableBody.innerHTML = dashboard.recent_sales.length ? dashboard.recent_sales.map(sale => '<tr><td>' + escapeHtml(sale.created_at.slice(0, 10)) + '</td><td>' + escapeHtml(sale.customer_name || "Walk-in") + '</td><td>' + escapeHtml(sale.product_name) + '</td><td>' + sale.quantity + '</td><td>' + currency(sale.total_amount_minor, sale.currency) + '</td><td><span class="payment-status ' + sale.payment_status + '">' + escapeHtml(sale.payment_status) + '</span></td><td>' + (sale.payment_status === "paid" ? '<span style="color:var(--muted)">—</span>' : '<button class="stock-action mark-paid-btn" data-sale-id="' + sale.id + '">Mark paid</button>') + '</td></tr>').join("") : '<tr><td colspan="7">No sales recorded yet.</td></tr>';
   document.querySelectorAll(".mark-paid-btn").forEach(button => button.addEventListener("click", () => markSalePaid(Number(button.dataset.saleId))));
 }
 
@@ -1152,7 +1184,7 @@ customerAddBtn.addEventListener("click", async () => {
 });
 saleProduct.addEventListener("change", () => {
   const selected = saleProduct.options[saleProduct.selectedIndex];
-  saleUnitPrice.value = selected && selected.dataset.price ? selected.dataset.price : "";
+  saleUnitPrice.value = selected && selected.dataset.priceMinor ? minorToInput(selected.dataset.priceMinor, selected.dataset.currency) : "";
 });
 salePaymentStatus.addEventListener("change", () => {
   saleDueDate.disabled = salePaymentStatus.value === "paid";
@@ -1162,7 +1194,9 @@ saleDueDate.disabled = true;
 saleAddBtn.addEventListener("click", async () => {
   const payload = {
     product_id:Number(saleProduct.value), customer_id:saleCustomer.value ? Number(saleCustomer.value) : null,
-    quantity:Number(saleQuantity.value), unit_price:saleUnitPrice.value === "" ? null : Number(saleUnitPrice.value),
+    quantity:Number(saleQuantity.value),
+    unit_price_minor:saleUnitPrice.value === "" ? null : majorInputToMinor(saleUnitPrice.value, saleProduct.options[saleProduct.selectedIndex].dataset.currency),
+    currency:saleProduct.options[saleProduct.selectedIndex].dataset.currency || workspaceCurrency,
     payment_status:salePaymentStatus.value, due_date:saleDueDate.value || null, reference_note:saleReference.value.trim()
   };
   if (!payload.product_id || !Number.isFinite(payload.quantity) || payload.quantity <= 0) { alert("Choose a product and enter a valid quantity."); return; }
@@ -1183,10 +1217,11 @@ async function loadFinanceWorkspace() {
   const res = await fetch("/finance/dashboard");
   if (!res.ok) { financeTableBody.innerHTML = '<tr><td colspan="6">Could not load Finance.</td></tr>'; return; }
   const dashboard = await res.json();
-  financeSummary.innerHTML = '<div class="inventory-stat"><span>30-day income</span><strong>' + currency(dashboard.income_30d) + '</strong></div><div class="inventory-stat"><span>30-day expenses</span><strong>' + currency(dashboard.expenses_30d) + '</strong></div><div class="inventory-stat"><span>Net cash flow</span><strong>' + currency(dashboard.net_cash_flow_30d) + '</strong></div><div class="inventory-stat"><span>Recorded cash balance</span><strong>' + currency(dashboard.cash_balance) + '</strong></div><div class="inventory-stat"><span>Receivables</span><strong>' + currency(dashboard.receivables) + '</strong></div>';
-  const categories = Object.entries(dashboard.expense_breakdown_30d);
-  expenseBreakdown.innerHTML = categories.length ? categories.map(([category, total]) => '<span class="supplier-chip"><strong>' + escapeHtml(category) + '</strong> · ' + currency(total) + '</span>').join("") : '<span class="supplier-chip">No expenses recorded</span>';
-  financeTableBody.innerHTML = dashboard.recent_transactions.length ? dashboard.recent_transactions.map(item => '<tr><td>' + escapeHtml(item.transaction_date) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.transaction_type) + '</td><td>' + escapeHtml(item.category) + '</td><td>' + escapeHtml(item.description || "—") + '</td><td class="finance-amount ' + item.transaction_type + '">' + (item.transaction_type === "income" ? "+" : "−") + currency(item.amount) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.source) + '</td></tr>').join("") : '<tr><td colspan="6">No finance transactions yet.</td></tr>';
+  workspaceCurrency = dashboard.currency || workspaceCurrency;
+  financeSummary.innerHTML = '<div class="inventory-stat"><span>30-day income</span><strong>' + currency(dashboard.income_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>30-day expenses</span><strong>' + currency(dashboard.expenses_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Net cash flow</span><strong>' + currency(dashboard.net_cash_flow_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Recorded cash balance</span><strong>' + currency(dashboard.cash_balance_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Receivables</span><strong>' + currency(dashboard.receivables_minor, dashboard.currency) + '</strong></div>';
+  const categories = Object.entries(dashboard.expense_breakdown_30d_minor);
+  expenseBreakdown.innerHTML = categories.length ? categories.map(([category, total]) => '<span class="supplier-chip"><strong>' + escapeHtml(category) + '</strong> · ' + currency(total, dashboard.currency) + '</span>').join("") : '<span class="supplier-chip">No expenses recorded</span>';
+  financeTableBody.innerHTML = dashboard.recent_transactions.length ? dashboard.recent_transactions.map(item => '<tr><td>' + escapeHtml(item.transaction_date) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.transaction_type) + '</td><td>' + escapeHtml(item.category) + '</td><td>' + escapeHtml(item.description || "—") + '</td><td class="finance-amount ' + item.transaction_type + '">' + (item.transaction_type === "income" ? "+" : "−") + currency(item.amount_minor, item.currency) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.source) + '</td></tr>').join("") : '<tr><td colspan="6">No finance transactions yet.</td></tr>';
 }
 async function askFinanceAgent(questionText) {
   const question = (questionText || financeQuestion.value).trim();
@@ -1216,8 +1251,8 @@ financeCloseBtn.addEventListener("click", () => financeModalOverlay.classList.re
 financeModalOverlay.addEventListener("click", event => { if (event.target === financeModalOverlay) financeModalOverlay.classList.remove("visible"); });
 financeType.addEventListener("change", () => { if (financeType.value === "income") financeCategory.value = "Other"; });
 financeAddBtn.addEventListener("click", async () => {
-  const payload = { transaction_type:financeType.value, amount:Number(financeAmount.value), category:financeCategory.value, description:financeDescription.value.trim(), transaction_date:financeDate.value || null };
-  if (!Number.isFinite(payload.amount) || payload.amount <= 0) { alert("Enter a valid transaction amount."); return; }
+  const payload = { transaction_type:financeType.value, amount_minor:majorInputToMinor(financeAmount.value, workspaceCurrency), currency:workspaceCurrency, category:financeCategory.value, description:financeDescription.value.trim(), transaction_date:financeDate.value || null };
+  if (!Number.isFinite(payload.amount_minor) || payload.amount_minor <= 0) { alert("Enter a valid transaction amount."); return; }
   financeAddBtn.disabled = true;
   const res = await fetch("/finance/transactions", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
   financeAddBtn.disabled = false;
@@ -1594,7 +1629,9 @@ async function afterLogin(email) {
   financeOpenBtn.style.display = "block";
   dataCheckOpenBtn.style.display = "block";
   const profileRes = await fetch("/company/profile");
-  companyUseRow.style.display = profileRes.ok && await profileRes.json() ? "flex" : "none";
+  const profile = profileRes.ok ? await profileRes.json() : null;
+  if (profile && profile.currency) workspaceCurrency = profile.currency;
+  companyUseRow.style.display = profile ? "flex" : "none";
   await loadHistory();
 }
 
