@@ -26,6 +26,7 @@ def signup(request: Request, body: SignupRequest):
     conn.close()
 
     request.session["user_id"] = user_id
+    request.session.pop("demo_mode", None)
     return UserResponse(id=user_id, email=body.email)
 
 
@@ -42,6 +43,7 @@ def login(request: Request, body: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
 
     request.session["user_id"] = user["id"]
+    request.session.pop("demo_mode", None)
     return UserResponse(id=user["id"], email=user["email"])
 
 
@@ -53,6 +55,8 @@ def logout(request: Request):
 
 @router.get("/auth/me")
 def me(request: Request):
+    if request.session.get("demo_mode"):
+        return {"logged_in": False, "demo_mode": True}
     user_id = request.session.get("user_id")
     if user_id is None:
         return {"logged_in": False}

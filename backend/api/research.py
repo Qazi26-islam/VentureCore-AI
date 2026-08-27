@@ -35,7 +35,12 @@ from backend.agents.coordinator import run_research
 from backend.agents import followup, inventory as inventory_agent, sales as sales_agent
 from backend.agents import finance_operations as finance_agent
 from backend import jobs
-from backend.db import DEFAULT_ORGANIZATION_ID, get_connection
+from backend.db import (
+    DEFAULT_ORGANIZATION_ID,
+    DEMO_ORGANIZATION_ID,
+    get_connection,
+    get_demo_user_id,
+)
 from backend.money import multiply_minor
 
 router = APIRouter()
@@ -43,11 +48,20 @@ logger = logging.getLogger("research_api")
 
 
 def get_user_id(request: Request):
-    return request.session.get("user_id")
+    user_id = request.session.get("user_id")
+    if user_id is not None:
+        return user_id
+    if is_demo_request(request):
+        return get_demo_user_id()
+    return None
 
 
-def get_organization_id(_request: Request) -> int:
-    return DEFAULT_ORGANIZATION_ID
+def is_demo_request(request: Request) -> bool:
+    return bool(request.session.get("demo_mode"))
+
+
+def get_organization_id(request: Request) -> int:
+    return DEMO_ORGANIZATION_ID if is_demo_request(request) else DEFAULT_ORGANIZATION_ID
 
 
 def require_login(request: Request) -> int:
@@ -55,6 +69,36 @@ def require_login(request: Request) -> int:
     if user_id is None:
         raise HTTPException(status_code=401, detail="You must be logged in.")
     return user_id
+
+
+def require_write_access(request: Request) -> int:
+    if is_demo_request(request):
+        raise HTTPException(
+            status_code=403,
+            detail="The public demo is read-only. Sign up to make changes in your own workspace.",
+        )
+    return require_login(request)
+
+
+def reject_demo_write(request: Request) -> None:
+    if is_demo_request(request):
+        raise HTTPException(
+            status_code=403,
+            detail="The public demo is read-only. Sign up to make changes in your own workspace.",
+        )
+
+
+@router.post("/demo/start")
+def start_demo(request: Request):
+    request.session.pop("user_id", None)
+    request.session["demo_mode"] = True
+    return {"status": "demo", "organization_id": DEMO_ORGANIZATION_ID}
+
+
+@router.post("/demo/exit")
+def exit_demo(request: Request):
+    request.session.pop("demo_mode", None)
+    return {"status": "exited"}
 
 
 def _profile_to_context(profile) -> str:
@@ -91,7 +135,7 @@ def get_company_profile(request: Request):
 
 @router.put("/company/profile", response_model=CompanyProfileResponse)
 def save_company_profile(body: CompanyProfileRequest, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     values = body.model_dump()
     conn = get_connection()
@@ -129,7 +173,7 @@ def _looks_numeric_column(name: str) -> bool:
 
 @router.post("/company/data/quality", response_model=DataQualityResponse)
 async def check_data_quality(request: Request, file: UploadFile = File(...), data_type: str = Form("Business data")):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     filename = file.filename or "upload"
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -189,7 +233,7 @@ async def check_data_quality(request: Request, file: UploadFile = File(...), dat
 
 @router.post("/inventory/suppliers")
 def create_supplier(body: SupplierRequest, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.execute(
@@ -221,7 +265,7 @@ def list_suppliers(request: Request):
 
 @router.post("/inventory/products")
 def create_product(body: ProductRequest, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     conn = get_connection()
     if body.supplier_id is not None:
@@ -255,7 +299,7 @@ def create_product(body: ProductRequest, request: Request):
 
 @router.post("/inventory/products/{product_id}/movement")
 def record_stock_movement(product_id: int, body: StockMovementRequest, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     conn = get_connection()
     product = conn.execute(
@@ -374,7 +418,7 @@ def ask_inventory_agent(body: InventoryQuestionRequest, request: Request):
 
 @router.post("/sales/customers")
 def create_customer(body: CustomerRequest, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.execute(
@@ -404,7 +448,7 @@ def list_customers(request: Request):
 
 @router.post("/sales/orders", response_model=SaleRecord)
 def record_sale(body: SaleRequest, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     conn = get_connection()
     product = conn.execute(
@@ -488,7 +532,7 @@ def record_sale(body: SaleRequest, request: Request):
 
 @router.post("/sales/orders/{sale_id}/mark-paid")
 def mark_sale_paid(sale_id: int, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     conn = get_connection()
     sale = conn.execute(
@@ -627,7 +671,7 @@ def ask_sales_agent(body: SalesQuestionRequest, request: Request):
 
 @router.post("/finance/transactions", response_model=FinanceTransactionItem)
 def create_finance_transaction(body: FinanceTransactionRequest, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     transaction_date = body.transaction_date or datetime.now().strftime("%Y-%m-%d")
     try:
@@ -779,6 +823,7 @@ def ask_finance_agent(body: FinanceQuestionRequest, request: Request):
 
 @router.post("/research/start", response_model=StartResponse)
 def start_research(request: Request, body: ResearchRequest) -> StartResponse:
+    reject_demo_write(request)
     user_id = get_user_id(request)
     organization_id = get_organization_id(request)
     research_question = body.question
@@ -921,7 +966,7 @@ def get_job_detail(job_id: str, request: Request):
 
 @router.put("/research/job/{job_id}/rename")
 def rename_job(job_id: str, body: RenameRequest, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.cursor()
@@ -943,7 +988,7 @@ def rename_job(job_id: str, body: RenameRequest, request: Request):
 
 @router.put("/research/job/{job_id}/favorite")
 def favorite_job(job_id: str, body: FavoriteRequest, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.cursor()
@@ -965,7 +1010,7 @@ def favorite_job(job_id: str, body: FavoriteRequest, request: Request):
 
 @router.delete("/research/job/{job_id}")
 def delete_job(job_id: str, request: Request):
-    user_id = require_login(request)
+    user_id = require_write_access(request)
     organization_id = get_organization_id(request)
     conn = get_connection()
     cursor = conn.cursor()
@@ -1229,6 +1274,7 @@ def export_xlsx(job_id: str, request: Request):
 
 @router.post("/research/job/{job_id}/message", response_model=FollowUpResponse)
 def send_follow_up(job_id: str, body: FollowUpRequest, request: Request):
+    reject_demo_write(request)
     user_id = get_user_id(request)
     organization_id = get_organization_id(request)
 

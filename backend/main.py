@@ -10,6 +10,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from backend.api.research import router as research_router
 from backend.api.auth import router as auth_router
 from backend.db import init_db
+from backend.seed_demo import seed_demo
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +32,7 @@ app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 @app.on_event("startup")
 def startup_event():
     init_db()
+    seed_demo()
 
 
 @app.get("/")

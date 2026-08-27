@@ -15,6 +15,19 @@ uvicorn backend.main:app --reload
 Set a real `GEMINI_API_KEY` in `.env` before starting the application. Set a stable
 `SESSION_SECRET` in production.
 
+## Public demo
+
+Startup automatically creates or refreshes the fictional, read-only Harbour & Pine demo
+workspace. Visitors can open it from the root page without an account. To seed a specific
+database manually, run:
+
+```bash
+python -m backend.seed_demo --database /path/to/app.db
+```
+
+The command is idempotent: it replaces only organisation `2` demo records and never changes a
+real account's organisation data.
+
 ## Database migrations
 
 Startup applies pending migrations automatically. To run or reverse the current migration

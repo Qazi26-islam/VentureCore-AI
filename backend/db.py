@@ -6,6 +6,8 @@ from backend.migrations import upgrade
 
 DB_PATH = Path(__file__).resolve().parent.parent / "app.db"
 DEFAULT_ORGANIZATION_ID = 1
+DEMO_ORGANIZATION_ID = 2
+DEMO_USER_EMAIL = "demo@venturecore.invalid"
 
 
 def get_connection():
@@ -13,6 +15,15 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def get_demo_user_id() -> int:
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM users WHERE email = ?", (DEMO_USER_EMAIL,)).fetchone()
+    conn.close()
+    if row is None:
+        raise RuntimeError("Demo data has not been seeded.")
+    return int(row["id"])
 
 
 def init_db():

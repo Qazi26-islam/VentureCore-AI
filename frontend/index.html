@@ -28,7 +28,7 @@
   * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   html, body { height: 100%; margin: 0; overflow: hidden; }
   body { background: radial-gradient(circle at 20% 0%, #161c2b 0%, var(--bg) 55%); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  #authOverlay { position: fixed; inset: 0; background: rgba(5, 7, 12, 0.85); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+  #authOverlay { position: fixed; inset: 0; background: rgba(5, 7, 12, 0.85); backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
   .auth-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: min(320px, 100%); }
   .auth-card h2 { margin: 0 0 4px; font-size: 20px; text-align: center; }
   .auth-card p.sub { color: var(--muted); font-size: 13px; text-align: center; margin: 0 0 20px; }
@@ -148,6 +148,12 @@
   .history-empty { font-size: 12px; color: var(--muted); padding: 4px; }
   .guest-note { font-size: 11.5px; color: var(--muted); padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; line-height: 1.5; flex-shrink: 0; }
   .guest-note a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+  .demo-entry-btn { width:100%; border:1px solid rgba(124,156,255,.55); background:rgba(124,156,255,.12); color:var(--text); border-radius:10px; padding:10px; font-weight:700; cursor:pointer; }
+  .demo-banner { display:none; position:fixed; top:0; left:0; right:0; z-index:120; align-items:center; justify-content:center; gap:8px; padding:8px 16px; background:#202842; border-bottom:1px solid rgba(124,156,255,.35); color:#dce4ff; font-size:12px; }
+  .demo-banner a { color:#ffffff; font-weight:700; text-decoration:underline; cursor:pointer; }
+  body.demo-mode .sidebar { padding-top:52px; }
+  body.demo-mode .sidebar-toggle { top:50px; }
+  body.demo-mode #companyModalOverlay, body.demo-mode #dataModalOverlay, body.demo-mode #inventoryModalOverlay, body.demo-mode #salesModalOverlay, body.demo-mode #financeModalOverlay { padding-top:52px; }
   .sidebar-toggle { position: fixed; top: 20px; left: 196px; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 50; transition: left 0.2s, color 0.2s, border-color 0.2s; }
   .sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
   .sidebar-toggle svg { width: 16px; height: 16px; stroke: currentColor; }
@@ -589,6 +595,7 @@
         <button class="logout-btn" id="logoutBtn">Log out</button>
       </div>
       <button class="new-research-btn" id="newResearchBtn">+ New Research</button>
+      <button class="demo-entry-btn" id="demoViewBtn">View demo workspace</button>
       <button class="company-btn" id="companyProfileBtn">My Company</button>
       <button class="inventory-btn" id="inventoryOpenBtn">Inventory</button>
       <button class="sales-btn" id="salesOpenBtn">Sales &amp; CRM</button>
@@ -605,6 +612,10 @@
   </aside>
 
   <main class="main-area">
+    <div class="demo-banner" id="demoBanner">
+      You are viewing fictional sample company data. Changes are disabled.
+      <a id="demoSignupLink">Sign up for your own workspace</a>
+    </div>
     <div class="wrap">
       <header>
         <h1>
@@ -752,6 +763,7 @@
 let currentJobId = null;
 let authMode = "login";
 let isGuest = false;
+let isDemo = false;
 let isResearching = false;
 let currentSections = {};
 let favFilterActive = false;
@@ -776,6 +788,9 @@ const guestLoginLink = document.getElementById("guestLoginLink");
 const userEmailEl = document.getElementById("userEmail");
 const logoutBtn = document.getElementById("logoutBtn");
 const newResearchBtn = document.getElementById("newResearchBtn");
+const demoViewBtn = document.getElementById("demoViewBtn");
+const demoBanner = document.getElementById("demoBanner");
+const demoSignupLink = document.getElementById("demoSignupLink");
 const companyProfileBtn = document.getElementById("companyProfileBtn");
 const inventoryOpenBtn = document.getElementById("inventoryOpenBtn");
 const salesOpenBtn = document.getElementById("salesOpenBtn");
@@ -1052,7 +1067,11 @@ async function loadInventory() {
     const row = document.createElement("tr");
     row.innerHTML = '<td><strong>' + escapeHtml(item.name) + '</strong><br><span style="color:var(--muted)">' + escapeHtml(item.sku || item.category || "No SKU") + (item.supplier_name ? ' · ' + escapeHtml(item.supplier_name) : '') + '</span></td><td><strong>' + item.current_stock + '</strong><br><span style="color:var(--muted)">' + currency(item.inventory_value_minor, item.currency) + '</span></td><td>' + item.average_daily_sales + '</td><td>' + daysLeft + '</td><td class="reorder-cell">' + recommendation + '</td><td><span class="stock-status ' + statusClass + '">' + escapeHtml(item.status) + '</span></td><td></td>';
     const actions = row.querySelector("td:last-child");
-    [["+ Receive", "received"], ["− Sold", "sold"], ["Damage", "damaged"]].forEach(([label, type]) => { const button = document.createElement("button"); button.className = "stock-action"; button.textContent = label; button.addEventListener("click", () => recordStockMovement(item, type)); actions.appendChild(button); });
+    if (isDemo) {
+      actions.innerHTML = '<span style="color:var(--muted)">View only</span>';
+    } else {
+      [["+ Receive", "received"], ["− Sold", "sold"], ["Damage", "damaged"]].forEach(([label, type]) => { const button = document.createElement("button"); button.className = "stock-action"; button.textContent = label; button.addEventListener("click", () => recordStockMovement(item, type)); actions.appendChild(button); });
+    }
     inventoryTableBody.appendChild(row);
   });
 }
@@ -1132,7 +1151,7 @@ async function loadSalesWorkspace() {
   workspaceCurrency = dashboard.currency || workspaceCurrency;
   saleProduct.innerHTML = '<option value="">Choose product</option>' + products.map(product => '<option value="' + product.id + '" data-price-minor="' + product.selling_price_minor + '" data-currency="' + product.currency + '">' + escapeHtml(product.name) + ' · ' + product.current_stock + ' in stock</option>').join("");
   salesSummary.innerHTML = '<div class="inventory-stat"><span>30-day revenue</span><strong>' + currency(dashboard.revenue_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Cash collected</span><strong>' + currency(dashboard.cash_collected_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Outstanding</span><strong>' + currency(dashboard.outstanding_amount_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Orders</span><strong>' + dashboard.orders_30d + '</strong></div><div class="inventory-stat"><span>Top customer</span><strong>' + escapeHtml(dashboard.top_customer || "Not enough data") + '</strong></div>';
-  salesTableBody.innerHTML = dashboard.recent_sales.length ? dashboard.recent_sales.map(sale => '<tr><td>' + escapeHtml(sale.created_at.slice(0, 10)) + '</td><td>' + escapeHtml(sale.customer_name || "Walk-in") + '</td><td>' + escapeHtml(sale.product_name) + '</td><td>' + sale.quantity + '</td><td>' + currency(sale.total_amount_minor, sale.currency) + '</td><td><span class="payment-status ' + sale.payment_status + '">' + escapeHtml(sale.payment_status) + '</span></td><td>' + (sale.payment_status === "paid" ? '<span style="color:var(--muted)">—</span>' : '<button class="stock-action mark-paid-btn" data-sale-id="' + sale.id + '">Mark paid</button>') + '</td></tr>').join("") : '<tr><td colspan="7">No sales recorded yet.</td></tr>';
+  salesTableBody.innerHTML = dashboard.recent_sales.length ? dashboard.recent_sales.map(sale => '<tr><td>' + escapeHtml(sale.created_at.slice(0, 10)) + '</td><td>' + escapeHtml(sale.customer_name || "Walk-in") + '</td><td>' + escapeHtml(sale.product_name) + '</td><td>' + sale.quantity + '</td><td>' + currency(sale.total_amount_minor, sale.currency) + '</td><td><span class="payment-status ' + sale.payment_status + '">' + escapeHtml(sale.payment_status) + '</span></td><td>' + (sale.payment_status === "paid" || isDemo ? '<span style="color:var(--muted)">—</span>' : '<button class="stock-action mark-paid-btn" data-sale-id="' + sale.id + '">Mark paid</button>') + '</td></tr>').join("") : '<tr><td colspan="7">No sales recorded yet.</td></tr>';
   document.querySelectorAll(".mark-paid-btn").forEach(button => button.addEventListener("click", () => markSalePaid(Number(button.dataset.saleId))));
 }
 
@@ -1588,6 +1607,7 @@ authSubmitBtn.addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) { authError.textContent = data.detail || "Something went wrong."; return; }
     isGuest = false;
+    isDemo = false;
     authOverlay.style.display = "none";
     await afterLogin(data.email);
   } catch (e) {
@@ -1598,9 +1618,33 @@ authSubmitBtn.addEventListener("click", async () => {
 skipLoginLink.addEventListener("click", () => enterGuestMode());
 guestLoginLink.addEventListener("click", () => { authOverlay.style.display = "flex"; });
 
+const demoWriteControls = [
+  companySaveBtn, dataCheckBtn, supplierAddBtn, productAddBtn,
+  customerAddBtn, saleAddBtn, financeAddBtn, submitBtn, followupSendBtn
+];
+const demoWriteAreas = [companyModalOverlay, dataModalOverlay, inventoryModalOverlay, salesModalOverlay, financeModalOverlay];
+
+function setDemoReadOnly(readOnly) {
+  demoWriteControls.forEach(control => { control.disabled = readOnly; control.style.display = readOnly ? "none" : ""; });
+  demoWriteAreas.forEach(area => {
+    area.querySelectorAll("input, select, textarea").forEach(control => {
+      const isAiQuestion = [inventoryQuestion, salesQuestion, financeQuestion].includes(control);
+      control.disabled = readOnly && !isAiQuestion;
+    });
+  });
+  questionEl.disabled = readOnly;
+  researchSetup.querySelectorAll("input, select, textarea").forEach(control => { control.disabled = readOnly; });
+  newResearchBtn.disabled = readOnly;
+}
+
 function enterGuestMode() {
   isGuest = true;
+  isDemo = false;
+  document.body.classList.remove("demo-mode");
   authOverlay.style.display = "none";
+  demoBanner.style.display = "none";
+  demoViewBtn.style.display = "block";
+  setDemoReadOnly(false);
   sidebarUserBlock.style.display = "none";
   document.querySelector(".history-search").style.display = "none";
   document.querySelector(".history-label").style.display = "none";
@@ -1614,9 +1658,59 @@ function enterGuestMode() {
   companyUseRow.style.display = "none";
 }
 
+async function enterDemoMode(openDashboard = false) {
+  isGuest = false;
+  isDemo = true;
+  document.body.classList.add("demo-mode");
+  authOverlay.style.display = "none";
+  demoBanner.style.display = "flex";
+  demoViewBtn.style.display = "none";
+  sidebarUserBlock.style.display = "block";
+  guestNote.style.display = "none";
+  document.querySelector(".history-search").style.display = "block";
+  document.querySelector(".history-label").style.display = "flex";
+  historyList.style.display = "flex";
+  userEmailEl.textContent = "Demo workspace";
+  logoutBtn.textContent = "Exit demo";
+  companyProfileBtn.style.display = "block";
+  inventoryOpenBtn.style.display = "block";
+  salesOpenBtn.style.display = "block";
+  financeOpenBtn.style.display = "block";
+  dataCheckOpenBtn.style.display = "block";
+  companyUseRow.style.display = "none";
+  setDemoReadOnly(true);
+  await loadHistory();
+  if (openDashboard) {
+    inventoryModalOverlay.classList.add("visible");
+    await Promise.all([loadSuppliers(), loadInventory()]);
+  }
+}
+
+demoViewBtn.addEventListener("click", async () => {
+  demoViewBtn.disabled = true;
+  const response = await fetch("/demo/start", { method: "POST" });
+  demoViewBtn.disabled = false;
+  if (!response.ok) { alert("The demo could not be opened. Please try again."); return; }
+  await enterDemoMode(true);
+});
+
+demoSignupLink.addEventListener("click", async () => {
+  await fetch("/demo/exit", { method: "POST" });
+  enterGuestMode();
+  setAuthMode("signup");
+  authOverlay.style.display = "flex";
+});
+
 logoutBtn.addEventListener("click", async () => { await fetch("/auth/logout", { method: "POST" }); location.reload(); });
 
 async function afterLogin(email) {
+  isGuest = false;
+  isDemo = false;
+  document.body.classList.remove("demo-mode");
+  demoBanner.style.display = "none";
+  demoViewBtn.style.display = "none";
+  logoutBtn.textContent = "Log out";
+  setDemoReadOnly(false);
   sidebarUserBlock.style.display = "block";
   guestNote.style.display = "none";
   document.querySelector(".history-search").style.display = "block";
@@ -1639,7 +1733,8 @@ async function checkAuth() {
   const res = await fetch("/auth/me");
   const data = await res.json();
   if (data.logged_in) { authOverlay.style.display = "none"; await afterLogin(data.email); }
-  else { authOverlay.style.display = "flex"; }
+  else if (data.demo_mode) { await enterDemoMode(false); }
+  else { enterGuestMode(); }
 }
 checkAuth();
 
@@ -1690,7 +1785,9 @@ async function loadHistory() {
         }
       }
     });
-    row.appendChild(star); row.appendChild(text); row.appendChild(more);
+    if (!isDemo) row.appendChild(star);
+    row.appendChild(text);
+    if (!isDemo) row.appendChild(more);
     historyList.appendChild(row);
   });
 }
