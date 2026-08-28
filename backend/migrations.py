@@ -17,6 +17,7 @@ from backend.money import (
 
 logger = logging.getLogger("database_migrations")
 MIGRATION_VERSION = 1
+OBSERVABILITY_MIGRATION_VERSION = 2
 DOMAIN_TABLES = (
     "research_jobs",
     "follow_up_messages",
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     salt TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin')),
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -371,6 +373,77 @@ def _create_sync_indexes(conn: sqlite3.Connection) -> None:
         )
 
 
+def _upgrade_observability(conn: sqlite3.Connection) -> None:
+    user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if "role" not in user_columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user' "
+            "CHECK(role IN ('user', 'admin'))"
+        )
+    conn.execute("""CREATE TABLE IF NOT EXISTS agent_runs (
+        id TEXT PRIMARY KEY,
+        organization_id INTEGER NOT NULL,
+        agent_name TEXT NOT NULL,
+        trigger_text TEXT,
+        job_id TEXT,
+        status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'success', 'error')),
+        failure_mode TEXT,
+        final_result TEXT,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_minor INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD' CHECK(length(currency) = 3 AND currency = UPPER(currency)),
+        latency_ms INTEGER,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finished_at TEXT,
+        FOREIGN KEY (organization_id) REFERENCES organizations(id))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS agent_run_steps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        organization_id INTEGER NOT NULL,
+        step_index INTEGER NOT NULL,
+        step_type TEXT NOT NULL CHECK(step_type IN ('model', 'tool')),
+        model_name TEXT,
+        tool_name TEXT,
+        arguments_json TEXT,
+        outcome_json TEXT,
+        status TEXT NOT NULL CHECK(status IN ('success', 'error')),
+        failure_mode TEXT,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_minor INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD' CHECK(length(currency) = 3 AND currency = UPPER(currency)),
+        latency_ms INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(run_id, step_index),
+        FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+        FOREIGN KEY (organization_id) REFERENCES organizations(id))""")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_agent_runs_created_at ON agent_runs(created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_agent_run_steps_tool ON agent_run_steps(tool_name)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)",
+        (OBSERVABILITY_MIGRATION_VERSION,),
+    )
+
+
+def _downgrade_observability(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE IF EXISTS agent_run_steps")
+    conn.execute("DROP TABLE IF EXISTS agent_runs")
+    conn.execute(
+        "DELETE FROM schema_migrations WHERE version = ?",
+        (OBSERVABILITY_MIGRATION_VERSION,),
+    )
+    user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    if "role" in user_columns:
+        conn.execute("ALTER TABLE users DROP COLUMN role")
+
+
 def upgrade(conn: sqlite3.Connection) -> None:
     conn.row_factory = sqlite3.Row
     conn.execute(USERS_SCHEMA)
@@ -380,6 +453,7 @@ def upgrade(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)")
     if conn.execute("SELECT 1 FROM schema_migrations WHERE version = ?", (MIGRATION_VERSION,)).fetchone():
         _create_sync_indexes(conn)
+        _upgrade_observability(conn)
         conn.commit()
         return
 
@@ -404,6 +478,7 @@ def upgrade(conn: sqlite3.Connection) -> None:
         )
         _create_sync_indexes(conn)
         conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (MIGRATION_VERSION,))
+        _upgrade_observability(conn)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -423,6 +498,7 @@ def downgrade(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
         conn.execute("BEGIN IMMEDIATE")
+        _downgrade_observability(conn)
         _replace_tables(conn, LEGACY_SCHEMAS, rows_by_table, _downgrade_row)
         conn.execute("DELETE FROM schema_migrations WHERE version = ?", (MIGRATION_VERSION,))
         conn.execute("DROP TABLE organizations")

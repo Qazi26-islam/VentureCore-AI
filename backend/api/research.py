@@ -4,10 +4,11 @@ import io
 import threading
 import re
 import csv
+import html
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import Response
+from fastapi.responses import HTMLResponse, Response
 import markdown as markdown_lib
 from xhtml2pdf import pisa
 from docx import Document
@@ -42,9 +43,58 @@ from backend.db import (
     get_demo_user_id,
 )
 from backend.tools import ToolContext, invoke_tool
+from backend.observability import dashboard_data, instrument_client, run_traced_agent
 
 router = APIRouter()
 logger = logging.getLogger("research_api")
+
+
+def require_admin(request: Request) -> int:
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Administrator sign-in required.")
+    conn = get_connection()
+    row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    if row is None or row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Administrator access required.")
+    return int(user_id)
+
+
+@router.get("/internal/agent-runs", response_class=HTMLResponse)
+def agent_runs_page(request: Request) -> HTMLResponse:
+    require_admin(request)
+    data = dashboard_data()
+    run_rows = "".join(
+        "<tr>"
+        f"<td>{html.escape(str(row['created_at']))}</td>"
+        f"<td>{html.escape(str(row['agent_name']))}</td>"
+        f"<td>{html.escape(str(row['status']))}</td>"
+        f"<td>{int(row['latency_ms'] or 0)} ms</td>"
+        f"<td>{int(row['input_tokens'])} / {int(row['output_tokens'])}</td>"
+        f"<td>${int(row['cost_minor']) / 100:.2f}</td>"
+        f"<td>{html.escape(str(row['trigger_text'] or ''))}</td>"
+        "</tr>"
+        for row in data["runs"]
+    ) or "<tr><td colspan='7'>No agent runs recorded yet.</td></tr>"
+    tool_rows = "".join(
+        f"<li>{html.escape(str(item['tool_name']))}: {int(item['calls'])}</li>"
+        for item in data["tool_frequency"]
+    ) or "<li>No tool calls recorded.</li>"
+    document = f"""<!doctype html><html><head><meta charset='utf-8'>
+    <title>VentureCore agent runs</title><style>
+    body{{font:14px system-ui;background:#0d1117;color:#e6edf3;padding:24px}}
+    table{{width:100%;border-collapse:collapse}}th,td{{padding:10px;border-bottom:1px solid #30363d;text-align:left}}
+    .metrics{{display:flex;gap:24px;margin:20px 0}}.metric{{background:#161b22;padding:16px;border-radius:8px}}
+    </style></head><body><h1>Agent runs</h1>
+    <div class='metrics'><div class='metric'>Median latency<br><strong>{data['median_latency_ms']} ms</strong></div>
+    <div class='metric'>p95 latency<br><strong>{data['p95_latency_ms']} ms</strong></div>
+    <div class='metric'>Error rate<br><strong>{data['error_rate']:.1f}%</strong></div></div>
+    <h2>Tool-call frequency</h2><ul>{tool_rows}</ul><h2>Recent runs</h2>
+    <table><thead><tr><th>Started</th><th>Agent</th><th>Status</th><th>Latency</th>
+    <th>Tokens in/out</th><th>Cost</th><th>Trigger</th></tr></thead><tbody>{run_rows}</tbody></table>
+    </body></html>"""
+    return HTMLResponse(document)
 
 
 def get_user_id(request: Request):
@@ -615,7 +665,10 @@ def start_research(request: Request, body: ResearchRequest) -> StartResponse:
 
     def _background_run():
         try:
-            run_research(research_question, job_id, mode=body.mode, depth=body.depth)
+            run_research(
+                research_question, job_id, mode=body.mode, depth=body.depth,
+                organization_id=organization_id,
+            )
             if user_id is not None:
                 job = jobs.get_job(job_id, organization_id)
                 conn2 = get_connection()
@@ -802,7 +855,13 @@ from backend.models.schemas import OpportunityRequest, OpportunityResponse, Oppo
 def find_opportunities(body: OpportunityRequest, request: Request):
     organization_id = get_organization_id(request)
     user_id = get_user_id(request) or 1
-    items = opportunity_finder.run(body.query, organization_id=organization_id, user_id=user_id)
+    opportunity_finder.client = instrument_client(opportunity_finder.client)
+    items = run_traced_agent(
+        "Opportunity Finder Agent", organization_id, body.query,
+        lambda: opportunity_finder.run(
+            body.query, organization_id=organization_id, user_id=user_id
+        ),
+    )
     return OpportunityResponse(items=[OpportunityItem(**item) for item in items])
 
 
@@ -1069,11 +1128,14 @@ def send_follow_up(job_id: str, body: FollowUpRequest, request: Request):
         report = job["report"] or ""
 
     try:
-        reply = followup.run(
-            question=question,
-            report=report,
-            history=history,
-            new_message=body.message,
+        followup.client = instrument_client(followup.client)
+        reply = run_traced_agent(
+            "Follow-up Agent", organization_id, body.message,
+            lambda: followup.run(
+                question=question, report=report, history=history,
+                new_message=body.message,
+            ),
+            job_id,
         )
     except Exception as e:
         if user_id is not None:
