@@ -10,8 +10,8 @@ QUICK_PROMPT = (
     "three specialist agents about the same business question. Combine "
     "them into a short report: for each of the three sections, a bold "
     "label on its own line (e.g. '**Market Research:**') followed by "
-    "their finding. After all three, add a '**Verdict:**' header with "
-    "GO, CAUTION, or NO-GO in bold, an Opportunity Score: X/100, and one "
+    "their finding. After the sections, add a '**Verdict:**' header with "
+    "GO, CAUTION, or NO-GO in bold and a short "
     "sentence explaining why. Keep the whole thing short — this is a "
     "quick scan, not a deep report."
 )
@@ -22,7 +22,7 @@ BASE_PROMPT = (
     "Competitor Analysis, and Financial Analysis, all about the same "
     "business question. Combine them into one clear, well-organized report "
     "following this EXACT structure:\n\n"
-    "1. For each of the three agent sections, start with the agent's name "
+    "For each agent section, start with the agent's name "
     "in bold followed by a colon on its own line (e.g. '**Market Research:**'), "
     "a blank line, then that agent's findings in clear paragraphs. If the "
     "Competitor Analysis section includes a markdown competitor comparison "
@@ -32,60 +32,41 @@ BASE_PROMPT = (
     "'**Sources:**' list, preserve it exactly as given too. Preserve any "
     "MARKET_CHART_DATA, COMPETITOR_CHART_DATA, and FINANCIAL_CHART_DATA lines "
     "exactly as supplied; never put them inside a code fence. After each "
-    "section, insert a horizontal divider on its own line using exactly "
+    "section, place a horizontal divider on its own line using exactly "
     "three dashes (---).\n\n"
-    "2. After all three sections and a divider, add a '**SWOT Analysis:**' "
+    "After the agent sections and a divider, add a '**SWOT Analysis:**' "
     "header followed by a markdown table with exactly this structure:\n"
     "| Strengths | Weaknesses |\n|---|---|\n| ... | ... |\n\n"
     "| Opportunities | Threats |\n|---|---|\n| ... | ... |\n\n"
-    "Keep each cell to 1-2 short bullet-style phrases separated by <br>. "
+    "Keep each cell to short bullet-style phrases separated by <br>. "
     "Base this only on the research given, do not invent new facts.\n\n"
-    "3. After another divider, add a '**Verdict:**' header. On the first "
+    "After another divider, add a '**Verdict:**' header. On the first "
     "line, state one of exactly: GO, CAUTION, or NO-GO in bold, followed by "
-    "a one-sentence reason. Then on separate lines give:\n"
-    "Opportunity Score: X/100\n"
-    "Market Attractiveness: X/10\n"
-    "Competition Level: X/10\n"
-    "Financial Feasibility: X/10\n"
-    "Overall Risk: Low, Medium, or High\n"
-    "Then a short 2-3 sentence explanation tying it together."
+    "a concise reason. State overall risk qualitatively, then explain how the evidence ties together. "
+    "Do not calculate or invent scores."
 )
 
 DEEP_ADDON = (
     " This is a DEEP RESEARCH request — make the explanation under the "
-    "Verdict noticeably more thorough (4-6 sentences), explicitly "
+    "Verdict noticeably more thorough, explicitly "
     "referencing specific facts from the research above rather than "
     "generic statements."
 )
 
 VALIDATOR_ADDON = (
-    "\n\n4. After another divider, add a '**Venture Score:**' header "
-    "specifically for validating this as a standalone business idea "
-    "(distinct from the general Verdict above). Give exactly these five "
-    "ratings, each on its own line:\n"
-    "Demand: X/10\n"
-    "Competition: X/10\n"
-    "Profitability: X/10\n"
-    "Scalability: X/10\n"
-    "Risk: X/10\n"
-    "Then a one-line bolded verdict phrase such as '**Promising opportunity "
+    "\n\nAfter another divider, add a '**Venture Assessment:**' header "
+    "specifically for validating this as a standalone business idea. "
+    "Discuss demand, competition, profitability, scalability, and risk qualitatively. "
+    "Then add a bolded verdict phrase such as '**Promising opportunity "
     "— proceed with validation.**' or '**High risk — needs significant "
     "de-risking before proceeding.**' matching the actual scores."
 )
-
-SCORING_NOTE = (
-    " Base all scores on reasoned judgment from the research provided, not "
-    "arbitrary numbers — a saturated competitive market or high startup "
-    "cost should lower scores accordingly, strong demand and low "
-    "competition should raise them."
-)
-
 
 def run(question: str, market: str, competitor: str, financial: str, mode: str = "market", depth: str = "standard") -> str:
     if depth == "quick":
         system_prompt = QUICK_PROMPT
     else:
-        system_prompt = BASE_PROMPT + SCORING_NOTE
+        system_prompt = BASE_PROMPT
         if depth == "deep":
             system_prompt += DEEP_ADDON
         if mode == "validate":

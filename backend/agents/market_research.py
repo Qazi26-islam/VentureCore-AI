@@ -7,7 +7,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 QUICK_PROMPT = (
     "You are a Market Research Agent doing a QUICK SCAN. Given a business "
-    "idea, write ONE short paragraph (3-4 sentences) covering the most "
+    "idea, write one short paragraph covering the most "
     "important market demand signal and one key trend. Use your general "
     "knowledge, be direct and fast. No sources needed."
 )
@@ -16,19 +16,15 @@ STANDARD_PROMPT = (
     "You are a Market Research Agent. Given a business idea or question, "
     "research current market demand, relevant trends, market size, and "
     "target customer profile using web search. Be concise and factual. "
-    "Write 3-5 short paragraphs. Do not discuss competitors or finances — "
+    "Use short paragraphs. Do not discuss competitors or finances because "
     "other agents handle those. Focus only on market demand, size, and trends. "
-    "At the very end, output one machine-readable line using exactly this format: "
-    "MARKET_CHART_DATA: {\"years\":[2026,2027,2028,2029,2030],\"values\":[10,12,14,17,20],\"unit\":\"USD millions\"}. "
-    "Replace the example numbers and unit with your evidence-based market projection. Output valid JSON on one line."
+    "Do not calculate projections. Any quantitative fact must be reproduced from a cited source."
 )
 
 DEEP_PROMPT = STANDARD_PROMPT + (
     " This is a DEEP RESEARCH request — be more thorough than usual. "
-    "Cover market size (TAM/SAM/SOM if data allows), specific growth "
-    "rates with numbers where you can find them, detailed customer "
-    "segments, and 2-3 notable industry trends with brief explanations. "
-    "Aim for 5-7 well-developed paragraphs."
+    "Cover market size where evidence allows, sourced growth evidence, detailed customer "
+    "segments, and notable industry trends with brief explanations."
 )
 
 

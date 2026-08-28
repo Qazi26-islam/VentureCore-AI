@@ -1,52 +1,40 @@
-import re
 from google import genai
 from google.genai import types
 
+from backend.agents.tool_runtime import request_tool_result
 from backend.config import GEMINI_API_KEY
+from backend.tools import ToolContext
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 SYSTEM_PROMPT = (
     "You are an Opportunity Finder Agent. Given a broad interest like "
     "'I want to start an AI business in Malaysia', use web search to "
-    "identify 4-6 concrete, realistic business opportunities matching "
-    "that interest. Output ONLY a markdown table, nothing else — no "
-    "intro, no explanation. Use EXACTLY these columns:\n"
-    "| Opportunity | Market | Difficulty | Potential |\n"
-    "|---|---|---|---|\n"
-    "Opportunity: a short, specific business idea name (a few words). "
-    "Market: the relevant industry/sector. Difficulty: exactly Low, "
-    "Medium, or High. Potential: a number from 0-100 reflecting overall "
-    "attractiveness, written as just the number (no /100, no extra text)."
+    "identify concrete, realistic business opportunities matching "
+    "that interest. Return concise researched findings with source links. "
+    "Do not calculate or invent attractiveness scores."
+)
+
+FORMAT_PROMPT = (
+    "Use the opportunity formatting tool to validate the researched candidates. "
+    "Give every candidate a stable textual identifier and attach relevant evidence identifiers. "
+    "Do not calculate potential; the tool applies that policy."
 )
 
 
-def _parse_table(text: str) -> list[dict]:
-    rows = []
-    for line in text.strip().split("\n"):
-        line = line.strip()
-        if not line.startswith("|"):
-            continue
-        # Skip separator rows like |---|---|---|---|
-        if re.match(r"^\|[\s\-:|]+\|$", line):
-            continue
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) != 4:
-            continue
-        if cells[0].lower() == "opportunity":
-            continue
-        potential_match = re.search(r"\d+", cells[3])
-        potential = int(potential_match.group()) if potential_match else 0
-        rows.append({
-            "opportunity": cells[0],
-            "market": cells[1],
-            "difficulty": cells[2],
-            "potential": potential,
-        })
-    return rows
+def _extract_source_ids(response) -> list[str]:
+    identifiers = []
+    try:
+        grounding = response.candidates[0].grounding_metadata
+        for chunk in grounding.grounding_chunks or []:
+            if chunk.web and chunk.web.uri:
+                identifiers.append(chunk.web.uri)
+    except (AttributeError, IndexError, TypeError):
+        return []
+    return list(dict.fromkeys(identifiers))
 
 
-def run(query: str) -> list[dict]:
+def run(query: str, organization_id: int, user_id: int) -> list[dict]:
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         contents=query,
@@ -55,4 +43,31 @@ def run(query: str) -> list[dict]:
             tools=[types.Tool(google_search=types.GoogleSearch())],
         ),
     )
-    return _parse_table(response.text)
+    source_ids = _extract_source_ids(response)
+    formatting_input = (
+        "Original request:\n"
+        + query
+        + "\n\nResearched findings:\n"
+        + (response.text or "")
+        + "\n\nEvidence identifiers:\n"
+        + "\n".join(source_ids)
+    )
+    result = request_tool_result(
+        client=client,
+        model="gemini-3.5-flash-lite",
+        prompt=formatting_input,
+        system_prompt=FORMAT_PROMPT,
+        tool_name="format_opportunities",
+        context=ToolContext(organization_id=organization_id, user_id=user_id),
+    )
+    if not result.ok:
+        return []
+    return [
+        {
+            "opportunity": item["opportunity"],
+            "market": item["market"],
+            "difficulty": item["difficulty"],
+            "potential": item["potential"],
+        }
+        for item in result.data["items"]
+    ]

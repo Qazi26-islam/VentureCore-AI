@@ -42,6 +42,7 @@ from backend.db import (
     get_demo_user_id,
 )
 from backend.money import multiply_minor
+from backend.tools import ToolContext, invoke_tool
 
 router = APIRouter()
 logger = logging.getLogger("research_api")
@@ -394,21 +395,11 @@ def inventory_dashboard(request: Request):
 def ask_inventory_agent(body: InventoryQuestionRequest, request: Request):
     user_id = require_login(request)
     organization_id = get_organization_id(request)
-    items = inventory_dashboard(request)
-    conn = get_connection()
-    profile = conn.execute(
-        """SELECT company_name, industry, country, currency, products_services,
-                  target_customers, business_goals, business_stage
-           FROM company_profiles WHERE user_id = ? AND organization_id = ?""",
-        (user_id, organization_id),
-    ).fetchone()
-    conn.close()
-    company_profile = dict(profile) if profile else {"currency": "MYR"}
     try:
         answer = inventory_agent.run(
             question=body.question,
-            company_profile=company_profile,
-            inventory_items=[item.model_dump() for item in items],
+            organization_id=organization_id,
+            user_id=user_id,
         )
     except Exception as exc:
         logger.exception("Inventory Agent failed: %s", exc)
@@ -450,83 +441,30 @@ def list_customers(request: Request):
 def record_sale(body: SaleRequest, request: Request):
     user_id = require_write_access(request)
     organization_id = get_organization_id(request)
-    conn = get_connection()
-    product = conn.execute(
-        """SELECT id, name, selling_price_minor, currency FROM products
-           WHERE id = ? AND user_id = ? AND organization_id = ? AND active = 1""",
-        (body.product_id, user_id, organization_id),
-    ).fetchone()
-    if product is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Product not found.")
-    customer_name = None
-    if body.customer_id is not None:
-        customer = conn.execute(
-            "SELECT id, name FROM customers WHERE id = ? AND user_id = ? AND organization_id = ?",
-            (body.customer_id, user_id, organization_id),
-        ).fetchone()
-        if customer is None:
-            conn.close()
-            raise HTTPException(status_code=404, detail="Customer not found.")
-        customer_name = customer["name"]
-    if body.due_date:
-        try:
-            datetime.strptime(body.due_date, "%Y-%m-%d")
-        except ValueError:
-            conn.close()
-            raise HTTPException(status_code=400, detail="Due date must use YYYY-MM-DD format.")
-    current_stock = float(conn.execute(
-        """SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_transactions
-           WHERE product_id = ? AND organization_id = ?""",
-        (body.product_id, organization_id),
-    ).fetchone()[0])
-    if body.quantity > current_stock:
-        conn.close()
-        raise HTTPException(status_code=400, detail=f"Not enough stock. Current stock is {current_stock}.")
-    if body.currency != product["currency"]:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Sale currency must match the product currency.")
-    unit_price_minor = body.unit_price_minor if body.unit_price_minor is not None else product["selling_price_minor"]
-    total_amount_minor = multiply_minor(unit_price_minor, body.quantity)
-    cursor = conn.execute(
-        """INSERT INTO sales_orders
-           (user_id, organization_id, customer_id, product_id, quantity, unit_price_minor,
-            total_amount_minor, currency, payment_status, due_date, reference_note, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual')""",
-        (user_id, organization_id, body.customer_id, body.product_id, body.quantity, unit_price_minor,
-         total_amount_minor, product["currency"], body.payment_status, body.due_date or None,
-         body.reference_note),
+    result = invoke_tool(
+        "record_sale",
+        ToolContext(organization_id=organization_id, user_id=user_id, source="manual"),
+        body.model_dump(),
     )
-    sale_id = cursor.lastrowid
-    conn.execute(
-        """INSERT INTO inventory_transactions
-           (product_id, user_id, organization_id, transaction_type, quantity_change,
-            unit_cost_minor, currency, reference_note, source, external_id)
-           VALUES (?, ?, ?, 'sold', ?, NULL, ?, ?, 'sale', ?)""",
-        (body.product_id, user_id, organization_id, -body.quantity, product["currency"],
-         f"Sale #{sale_id}: {body.reference_note}".strip(), str(sale_id)),
+    if not result.ok:
+        error = result.error
+        status_code = 404 if error and error.code.endswith("_not_found") else 400
+        if error and error.code == "tool_execution_failed":
+            status_code = 500
+        raise HTTPException(status_code=status_code, detail=error.message if error else "Could not record sale.")
+    sale = result.data or {}
+    effective_status = (
+        "overdue"
+        if sale["payment_status"] == "due"
+        and sale.get("due_date")
+        and sale["due_date"] < datetime.now().strftime("%Y-%m-%d")
+        else sale["payment_status"]
     )
-    if body.payment_status == "paid":
-        conn.execute(
-            """INSERT OR IGNORE INTO finance_transactions
-               (user_id, organization_id, transaction_type, amount_minor, currency, category,
-                description, source, external_id, related_sale_id, transaction_date)
-               VALUES (?, ?, 'income', ?, ?, 'Sales Revenue', ?, 'sale', ?, ?, date('now'))""",
-            (user_id, organization_id, total_amount_minor, product["currency"],
-             f"Payment received for sale #{sale_id}", str(sale_id), sale_id),
-        )
-    conn.commit()
-    row = conn.execute(
-        "SELECT created_at FROM sales_orders WHERE id = ? AND organization_id = ?",
-        (sale_id, organization_id),
-    ).fetchone()
-    conn.close()
-    effective_status = "overdue" if body.payment_status == "due" and body.due_date and body.due_date < datetime.now().strftime("%Y-%m-%d") else body.payment_status
     return SaleRecord(
-        id=sale_id, customer_name=customer_name, product_name=product["name"], quantity=body.quantity,
-        unit_price_minor=unit_price_minor, total_amount_minor=total_amount_minor,
-        currency=product["currency"], payment_status=effective_status,
-        due_date=body.due_date, created_at=row["created_at"],
+        id=sale["id"], customer_name=sale.get("customer_name"), product_name=sale["product_name"],
+        quantity=sale["quantity"], unit_price_minor=sale["unit_price_minor"],
+        total_amount_minor=sale["total_amount_minor"], currency=sale["currency"],
+        payment_status=effective_status, due_date=sale.get("due_date"), created_at=sale["created_at"],
     )
 
 
@@ -612,57 +550,8 @@ def sales_dashboard(request: Request):
 def ask_sales_agent(body: SalesQuestionRequest, request: Request):
     user_id = require_login(request)
     organization_id = get_organization_id(request)
-    dashboard = sales_dashboard(request)
-    conn = get_connection()
-    profile = conn.execute(
-        """SELECT company_name, industry, country, currency, products_services,
-                  target_customers, business_goals, business_stage
-           FROM company_profiles WHERE user_id = ? AND organization_id = ?""",
-        (user_id, organization_id),
-    ).fetchone()
-    customer_performance = conn.execute(
-        """SELECT c.id, c.name, c.segment, COUNT(s.id) AS order_count,
-                  COALESCE(SUM(s.total_amount_minor), 0) AS total_revenue_minor,
-                  COALESCE(SUM(CASE WHEN s.payment_status != 'paid' THEN s.total_amount_minor ELSE 0 END), 0) AS outstanding_amount_minor,
-                  MAX(s.created_at) AS last_purchase
-           FROM customers c LEFT JOIN sales_orders s
-             ON s.customer_id = c.id AND s.organization_id = c.organization_id
-           WHERE c.user_id = ? AND c.organization_id = ? GROUP BY c.id
-           ORDER BY total_revenue_minor DESC, c.name COLLATE NOCASE LIMIT 25""",
-        (user_id, organization_id),
-    ).fetchall()
-    product_performance = conn.execute(
-        """SELECT p.id, p.name, SUM(s.quantity) AS units_sold,
-                  SUM(s.total_amount_minor) AS revenue_minor, MAX(s.currency) AS currency
-           FROM sales_orders s JOIN products p
-             ON p.id = s.product_id AND p.organization_id = s.organization_id
-           WHERE s.user_id = ? AND s.organization_id = ?
-             AND s.created_at >= datetime('now', '-30 days')
-           GROUP BY p.id ORDER BY revenue_minor DESC LIMIT 25""",
-        (user_id, organization_id),
-    ).fetchall()
-    outstanding_invoices = conn.execute(
-        """SELECT s.id, c.name AS customer_name, p.name AS product_name,
-                  s.total_amount_minor, s.currency, s.due_date,
-                  CASE WHEN s.due_date IS NOT NULL AND date(s.due_date) < date('now')
-                       THEN 'overdue' ELSE 'due' END AS status
-           FROM sales_orders s
-           JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
-           LEFT JOIN customers c ON c.id = s.customer_id AND c.organization_id = s.organization_id
-           WHERE s.user_id = ? AND s.organization_id = ? AND s.payment_status != 'paid'
-           ORDER BY COALESCE(s.due_date, '9999-12-31'), s.created_at LIMIT 50""",
-        (user_id, organization_id),
-    ).fetchall()
-    conn.close()
-    sales_context = {
-        "company_profile": dict(profile) if profile else {"currency": "MYR"},
-        "dashboard": dashboard.model_dump(),
-        "customer_performance": [dict(row) for row in customer_performance],
-        "product_performance_last_30_days": [dict(row) for row in product_performance],
-        "outstanding_invoices": [dict(row) for row in outstanding_invoices],
-    }
     try:
-        answer = sales_agent.run(body.question, sales_context)
+        answer = sales_agent.run(body.question, organization_id=organization_id, user_id=user_id)
     except Exception as exc:
         logger.exception("Sales Agent failed: %s", exc)
         raise HTTPException(status_code=502, detail="The Sales Agent is temporarily unavailable. Please try again.")
@@ -749,72 +638,8 @@ def finance_dashboard(request: Request):
 def ask_finance_agent(body: FinanceQuestionRequest, request: Request):
     user_id = require_login(request)
     organization_id = get_organization_id(request)
-    finance = finance_dashboard(request)
-    sales = sales_dashboard(request)
-    inventory = inventory_dashboard(request)
-    conn = get_connection()
-    profile = conn.execute(
-        """SELECT company_name, industry, country, currency, products_services,
-                  monthly_budget_minor, business_goals, business_stage
-           FROM company_profiles WHERE user_id = ? AND organization_id = ?""",
-        (user_id, organization_id),
-    ).fetchone()
-    monthly_cash_flow = conn.execute(
-        """SELECT strftime('%Y-%m', transaction_date) AS month,
-                  SUM(CASE WHEN transaction_type = 'income' THEN amount_minor ELSE 0 END) AS income_minor,
-                  SUM(CASE WHEN transaction_type = 'expense' THEN amount_minor ELSE 0 END) AS expenses_minor,
-                  MAX(currency) AS currency
-           FROM finance_transactions
-           WHERE user_id = ? AND organization_id = ? AND transaction_date >= date('now', '-6 months')
-           GROUP BY month ORDER BY month""",
-        (user_id, organization_id),
-    ).fetchall()
-    expense_categories = conn.execute(
-        """SELECT COALESCE(category, 'Other') AS category, SUM(amount_minor) AS amount_minor,
-                  MAX(currency) AS currency
-           FROM finance_transactions
-           WHERE user_id = ? AND organization_id = ? AND transaction_type = 'expense'
-             AND transaction_date >= date('now', '-90 days')
-           GROUP BY category ORDER BY amount_minor DESC""",
-        (user_id, organization_id),
-    ).fetchall()
-    outstanding_invoices = conn.execute(
-        """SELECT s.id, c.name AS customer_name, s.total_amount_minor, s.currency, s.due_date,
-                  CASE WHEN s.due_date IS NOT NULL AND date(s.due_date) < date('now')
-                       THEN 'overdue' ELSE 'due' END AS status
-           FROM sales_orders s LEFT JOIN customers c
-             ON c.id = s.customer_id AND c.organization_id = s.organization_id
-           WHERE s.user_id = ? AND s.organization_id = ? AND s.payment_status != 'paid'
-           ORDER BY COALESCE(s.due_date, '9999-12-31') LIMIT 50""",
-        (user_id, organization_id),
-    ).fetchall()
-    conn.close()
-    finance_context = {
-        "company_profile": dict(profile) if profile else {"currency": "MYR"},
-        "finance_dashboard": finance.model_dump(),
-        "sales_summary": {
-            "revenue_30d_minor": sales.revenue_30d_minor,
-            "cash_collected_30d_minor": sales.cash_collected_30d_minor,
-            "outstanding_amount_minor": sales.outstanding_amount_minor,
-            "currency": sales.currency,
-            "orders_30d": sales.orders_30d,
-        },
-        "inventory_commitments": {
-            "current_inventory_value_minor": sum(item.inventory_value_minor for item in inventory),
-            "estimated_reorder_cost_minor": sum(item.estimated_reorder_cost_minor for item in inventory),
-            "currency": finance.currency,
-            "products_needing_attention": sum(item.status != "Healthy" for item in inventory),
-        },
-        "monthly_cash_flow_last_6_months": [dict(row) for row in monthly_cash_flow],
-        "expense_categories_last_90_days": [dict(row) for row in expense_categories],
-        "outstanding_invoices": [dict(row) for row in outstanding_invoices],
-        "data_limitations": [
-            "Cash balance includes only transactions recorded in VentureCore.",
-            "No bank account, loan, tax, payroll, or external accounting balance is connected unless manually recorded.",
-        ],
-    }
     try:
-        answer = finance_agent.run(body.question, finance_context)
+        answer = finance_agent.run(body.question, organization_id=organization_id, user_id=user_id)
     except Exception as exc:
         logger.exception("Finance Agent failed: %s", exc)
         raise HTTPException(status_code=502, detail="The Finance Agent is temporarily unavailable. Please try again.")
@@ -1039,8 +864,10 @@ from backend.models.schemas import OpportunityRequest, OpportunityResponse, Oppo
 
 
 @router.post("/research/opportunities", response_model=OpportunityResponse)
-def find_opportunities(body: OpportunityRequest):
-    items = opportunity_finder.run(body.query)
+def find_opportunities(body: OpportunityRequest, request: Request):
+    organization_id = get_organization_id(request)
+    user_id = get_user_id(request) or 1
+    items = opportunity_finder.run(body.query, organization_id=organization_id, user_id=user_id)
     return OpportunityResponse(items=[OpportunityItem(**item) for item in items])
 
 
