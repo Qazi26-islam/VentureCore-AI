@@ -95,6 +95,10 @@
   .inventory-stat { padding:10px; background:var(--panel2); border-radius:9px; }
   .inventory-stat span { display:block; color:var(--muted); font-size:10.5px; }
   .inventory-stat strong { display:block; margin-top:3px; font-size:15px; }
+  .figure-workings { margin-top:7px; font-size:10px; color:var(--muted); }
+  .figure-workings summary { cursor:pointer; color:var(--accent); font-weight:700; }
+  .figure-workings div { margin-top:6px; line-height:1.5; overflow-wrap:anywhere; }
+  .figure-workings code { color:var(--text); font-size:10px; }
   .inventory-table { width:100%; border-collapse:collapse; font-size:12px; }
   .inventory-table th,.inventory-table td { text-align:left; border-bottom:1px solid var(--border); padding:9px 6px; vertical-align:middle; }
   .inventory-table th { color:var(--muted); font-size:10.5px; text-transform:uppercase; }
@@ -1040,6 +1044,15 @@ function currency(valueMinor, currencyCode = workspaceCurrency) {
   return new Intl.NumberFormat(undefined, { style:"currency", currency:currencyCode, minimumFractionDigits:exponent, maximumFractionDigits:exponent }).format((valueMinor || 0) / minorScale(currencyCode));
 }
 function escapeHtml(value) { const holder = document.createElement("div"); holder.textContent = String(value ?? ""); return holder.innerHTML; }
+function workingsHtml(workings) {
+  if (!workings) return "";
+  const sources = Object.entries(workings.source_row_ids || {}).map(([table, ids]) => escapeHtml(table) + ": " + (ids.length ? ids.map(id => "#" + escapeHtml(id)).join(", ") : "none")).join("<br>");
+  const inputs = Object.entries(workings.inputs || {}).map(([key, value]) => escapeHtml(key) + "=" + escapeHtml(value)).join(", ") || "none";
+  return '<details class="figure-workings"><summary>Show workings</summary><div><strong>Tool:</strong> <code>' + escapeHtml(workings.tool) + '</code><br><strong>Inputs:</strong> ' + inputs + '<br><strong>Source rows:</strong><br>' + (sources || "none") + '</div></details>';
+}
+function metricCard(label, value, workings) {
+  return '<div class="inventory-stat"><span>' + escapeHtml(label) + '</span><strong>' + value + '</strong>' + workingsHtml(workings) + '</div>';
+}
 
 async function loadSuppliers() {
   const res = await fetch("/inventory/suppliers");
@@ -1052,12 +1065,14 @@ async function loadSuppliers() {
 async function loadInventory() {
   const res = await fetch("/inventory/dashboard");
   if (!res.ok) { inventoryTableBody.innerHTML = '<tr><td colspan="7">Could not load inventory.</td></tr>'; return; }
-  const items = await res.json();
-  if (items.length) workspaceCurrency = items[0].currency || workspaceCurrency;
-  const totalValue = items.reduce((sum, item) => sum + item.inventory_value_minor, 0);
-  const reorderCount = items.filter(item => item.status !== "Healthy").length;
-  const reorderCost = items.reduce((sum, item) => sum + item.estimated_reorder_cost_minor, 0);
-  inventorySummary.innerHTML = '<div class="inventory-stat"><span>Products</span><strong>' + items.length + '</strong></div><div class="inventory-stat"><span>Inventory value</span><strong>' + currency(totalValue, workspaceCurrency) + '</strong></div><div class="inventory-stat"><span>Needs attention</span><strong>' + reorderCount + '</strong></div><div class="inventory-stat"><span>Estimated reorder cost</span><strong>' + currency(reorderCost, workspaceCurrency) + '</strong></div>';
+  const data = await res.json();
+  const items = data.items;
+  workspaceCurrency = data.currency || workspaceCurrency;
+  inventorySummary.innerHTML =
+    metricCard("Products", data.products_count, data.workings.products_count) +
+    metricCard("Inventory value", currency(data.inventory_value_minor, data.currency), data.workings.inventory_value_minor) +
+    metricCard("Needs attention", data.needs_attention, data.workings.needs_attention) +
+    metricCard("Estimated reorder cost", currency(data.estimated_reorder_cost_minor, data.currency), data.workings.estimated_reorder_cost_minor);
   inventoryTableBody.innerHTML = "";
   if (!items.length) { inventoryTableBody.innerHTML = '<tr><td colspan="7">No products yet. Add your first product above.</td></tr>'; return; }
   items.forEach(item => {
@@ -1144,13 +1159,20 @@ async function loadSalesWorkspace() {
     return;
   }
   const customers = await customersRes.json();
-  const products = await productsRes.json();
+  const productsData = await productsRes.json();
+  const products = productsData.items;
   const dashboard = await dashboardRes.json();
   saleCustomer.innerHTML = '<option value="">Walk-in / no customer</option>' + customers.map(customer => '<option value="' + customer.id + '">' + escapeHtml(customer.name) + '</option>').join("");
   customerList.innerHTML = customers.length ? customers.map(customer => '<span class="supplier-chip"><strong>' + escapeHtml(customer.name) + '</strong>' + (customer.segment ? ' · ' + escapeHtml(customer.segment) : '') + '</span>').join("") : '<span class="supplier-chip">No customers yet</span>';
   workspaceCurrency = dashboard.currency || workspaceCurrency;
   saleProduct.innerHTML = '<option value="">Choose product</option>' + products.map(product => '<option value="' + product.id + '" data-price-minor="' + product.selling_price_minor + '" data-currency="' + product.currency + '">' + escapeHtml(product.name) + ' · ' + product.current_stock + ' in stock</option>').join("");
-  salesSummary.innerHTML = '<div class="inventory-stat"><span>30-day revenue</span><strong>' + currency(dashboard.revenue_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Cash collected</span><strong>' + currency(dashboard.cash_collected_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Outstanding</span><strong>' + currency(dashboard.outstanding_amount_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Orders</span><strong>' + dashboard.orders_30d + '</strong></div><div class="inventory-stat"><span>Top customer</span><strong>' + escapeHtml(dashboard.top_customer || "Not enough data") + '</strong></div>';
+  salesSummary.innerHTML =
+    metricCard("30-day revenue", currency(dashboard.revenue_30d_minor, dashboard.currency), dashboard.workings.revenue_minor) +
+    metricCard("Cash collected", currency(dashboard.cash_collected_30d_minor, dashboard.currency), dashboard.workings.cash_collected_minor) +
+    metricCard("Outstanding", currency(dashboard.outstanding_amount_minor, dashboard.currency), dashboard.workings.outstanding_amount_minor) +
+    metricCard("Overdue", currency(dashboard.overdue_receivables_minor, dashboard.currency), dashboard.workings.overdue_receivables_minor) +
+    metricCard("Orders", dashboard.orders_30d, dashboard.workings.orders) +
+    '<div class="inventory-stat"><span>Top customer</span><strong>' + escapeHtml(dashboard.top_customer || "Not enough data") + '</strong></div>';
   salesTableBody.innerHTML = dashboard.recent_sales.length ? dashboard.recent_sales.map(sale => '<tr><td>' + escapeHtml(sale.created_at.slice(0, 10)) + '</td><td>' + escapeHtml(sale.customer_name || "Walk-in") + '</td><td>' + escapeHtml(sale.product_name) + '</td><td>' + sale.quantity + '</td><td>' + currency(sale.total_amount_minor, sale.currency) + '</td><td><span class="payment-status ' + sale.payment_status + '">' + escapeHtml(sale.payment_status) + '</span></td><td>' + (sale.payment_status === "paid" || isDemo ? '<span style="color:var(--muted)">—</span>' : '<button class="stock-action mark-paid-btn" data-sale-id="' + sale.id + '">Mark paid</button>') + '</td></tr>').join("") : '<tr><td colspan="7">No sales recorded yet.</td></tr>';
   document.querySelectorAll(".mark-paid-btn").forEach(button => button.addEventListener("click", () => markSalePaid(Number(button.dataset.saleId))));
 }
@@ -1237,9 +1259,14 @@ async function loadFinanceWorkspace() {
   if (!res.ok) { financeTableBody.innerHTML = '<tr><td colspan="6">Could not load Finance.</td></tr>'; return; }
   const dashboard = await res.json();
   workspaceCurrency = dashboard.currency || workspaceCurrency;
-  financeSummary.innerHTML = '<div class="inventory-stat"><span>30-day income</span><strong>' + currency(dashboard.income_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>30-day expenses</span><strong>' + currency(dashboard.expenses_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Net cash flow</span><strong>' + currency(dashboard.net_cash_flow_30d_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Recorded cash balance</span><strong>' + currency(dashboard.cash_balance_minor, dashboard.currency) + '</strong></div><div class="inventory-stat"><span>Receivables</span><strong>' + currency(dashboard.receivables_minor, dashboard.currency) + '</strong></div>';
+  financeSummary.innerHTML =
+    metricCard("30-day income", currency(dashboard.income_30d_minor, dashboard.currency), dashboard.workings.income_minor) +
+    metricCard("30-day expenses", currency(dashboard.expenses_30d_minor, dashboard.currency), dashboard.workings.expenses_minor) +
+    metricCard("Net cash flow", currency(dashboard.net_cash_flow_30d_minor, dashboard.currency), dashboard.workings.net_cash_flow_minor) +
+    metricCard("Recorded cash balance", currency(dashboard.cash_balance_minor, dashboard.currency), dashboard.workings.recorded_cash_balance_minor) +
+    metricCard("Receivables", currency(dashboard.receivables_minor, dashboard.currency), dashboard.workings.receivables_minor);
   const categories = Object.entries(dashboard.expense_breakdown_30d_minor);
-  expenseBreakdown.innerHTML = categories.length ? categories.map(([category, total]) => '<span class="supplier-chip"><strong>' + escapeHtml(category) + '</strong> · ' + currency(total, dashboard.currency) + '</span>').join("") : '<span class="supplier-chip">No expenses recorded</span>';
+  expenseBreakdown.innerHTML = categories.length ? categories.map(([category, total]) => '<div class="supplier-chip"><strong>' + escapeHtml(category) + '</strong> · ' + currency(total, dashboard.currency) + workingsHtml(dashboard.expense_workings[category]) + '</div>').join("") : '<span class="supplier-chip">No expenses recorded</span>';
   financeTableBody.innerHTML = dashboard.recent_transactions.length ? dashboard.recent_transactions.map(item => '<tr><td>' + escapeHtml(item.transaction_date) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.transaction_type) + '</td><td>' + escapeHtml(item.category) + '</td><td>' + escapeHtml(item.description || "—") + '</td><td class="finance-amount ' + item.transaction_type + '">' + (item.transaction_type === "income" ? "+" : "−") + currency(item.amount_minor, item.currency) + '</td><td style="text-transform:capitalize">' + escapeHtml(item.source) + '</td></tr>').join("") : '<tr><td colspan="6">No finance transactions yet.</td></tr>';
 }
 async function askFinanceAgent(questionText) {
@@ -1339,94 +1366,24 @@ agentModalClose.addEventListener("click", () => agentModalOverlay.classList.remo
 agentModalOverlay.addEventListener("click", (e) => { if (e.target === agentModalOverlay) agentModalOverlay.classList.remove("visible"); });
 
 function parseVerdict(text) {
-  const oppMatch = text.match(/Opportunity Score:\s*(\d+)\s*\/\s*100/i);
-  const marketMatch = text.match(/Market Attractiveness:\s*([\d.]+)\s*\/\s*10/i);
-  const compMatch = text.match(/Competition Level:\s*([\d.]+)\s*\/\s*10/i);
-  const finMatch = text.match(/Financial Feasibility:\s*([\d.]+)\s*\/\s*10/i);
   const riskMatch = text.match(/Overall Risk:\s*(Low|Medium|High)/i);
   const verdictSectionMatch = text.match(/Verdict:?[\s\S]{0,40}?\b(GO|CAUTION|NO-GO)\b/i);
-  if (!oppMatch && !verdictSectionMatch) return null;
+  if (!verdictSectionMatch) return null;
   return {
-    verdict: verdictSectionMatch ? verdictSectionMatch[1].toUpperCase() : null,
-    opportunity: oppMatch ? parseInt(oppMatch[1]) : null,
-    market: marketMatch ? parseFloat(marketMatch[1]) : null,
-    competition: compMatch ? parseFloat(compMatch[1]) : null,
-    financial: finMatch ? parseFloat(finMatch[1]) : null,
+    verdict: verdictSectionMatch[1].toUpperCase(),
     risk: riskMatch ? riskMatch[1] : null,
-  };
-}
-
-function parseVentureScore(text) {
-  const idx = text.search(/\*\*Venture Score:?\*\*/i);
-  if (idx === -1) return null;
-  const block = text.slice(idx);
-  const demand = block.match(/Demand:\s*([\d.]+)\s*\/\s*10/i);
-  const competition = block.match(/Competition:\s*([\d.]+)\s*\/\s*10/i);
-  const profitability = block.match(/Profitability:\s*([\d.]+)\s*\/\s*10/i);
-  const scalability = block.match(/Scalability:\s*([\d.]+)\s*\/\s*10/i);
-  const risk = block.match(/Risk:\s*([\d.]+)\s*\/\s*10/i);
-  if (!demand && !competition && !profitability && !scalability && !risk) return null;
-  const afterRisk = block.slice(risk ? risk.index + risk[0].length : 0);
-  const phraseMatch = afterRisk.match(/\*\*([^*\n]{5,150})\*\*/);
-  return {
-    demand: demand ? parseFloat(demand[1]) : null,
-    competition: competition ? parseFloat(competition[1]) : null,
-    profitability: profitability ? parseFloat(profitability[1]) : null,
-    scalability: scalability ? parseFloat(scalability[1]) : null,
-    risk: risk ? parseFloat(risk[1]) : null,
-    phrase: phraseMatch ? phraseMatch[1].trim() : null,
   };
 }
 
 function renderVerdictCard(text) {
   const v = parseVerdict(text);
-  const vs = parseVentureScore(text);
-  if (!v && !vs) { verdictSection.style.display = "none"; return; }
-  let html = "";
-  if (v) {
-    let badgeClass = "caution";
-    if (v.verdict === "GO") badgeClass = "go"; else if (v.verdict === "NO-GO") badgeClass = "nogo";
-    const bars = [];
-    if (v.market !== null) bars.push({ label: "Market Attractiveness", value: v.market, max: 10 });
-    if (v.competition !== null) bars.push({ label: "Competition Level", value: v.competition, max: 10 });
-    if (v.financial !== null) bars.push({ label: "Financial Feasibility", value: v.financial, max: 10 });
-    html += '<div class="verdict-top">';
-    if (v.verdict) html += '<span class="verdict-badge ' + badgeClass + '">' + v.verdict + '</span>';
-    if (v.opportunity !== null) html += '<span class="verdict-score-big">' + v.opportunity + '<span>/100 Opportunity Score</span></span>';
-    html += '</div>';
-    if (bars.length > 0) {
-      html += '<div class="verdict-bars">';
-      bars.forEach(bar => {
-        const pct = (bar.value / bar.max) * 100;
-        html += '<div class="verdict-bar-row"><div class="verdict-bar-label">' + bar.label + '</div><div class="verdict-bar-track"><div class="verdict-bar-fill" style="width:0%" data-target="' + pct + '"></div></div><div class="verdict-bar-value">' + bar.value + '/' + bar.max + '</div></div>';
-      });
-      html += '</div>';
-    }
-    if (v.risk) html += '<div class="verdict-risk">Overall Risk: <strong>' + v.risk + '</strong></div>';
-  }
-  if (vs) {
-    const vsBars = [];
-    if (vs.demand !== null) vsBars.push({ label: "Demand", value: vs.demand });
-    if (vs.competition !== null) vsBars.push({ label: "Competition", value: vs.competition });
-    if (vs.profitability !== null) vsBars.push({ label: "Profitability", value: vs.profitability });
-    if (vs.scalability !== null) vsBars.push({ label: "Scalability", value: vs.scalability });
-    if (vs.risk !== null) vsBars.push({ label: "Risk", value: vs.risk });
-    html += '<div class="venture-score-block"><div class="venture-score-title">Venture Score</div><div class="verdict-bars">';
-    vsBars.forEach(bar => {
-      const pct = (bar.value / 10) * 100;
-      html += '<div class="verdict-bar-row"><div class="verdict-bar-label">' + bar.label + '</div><div class="verdict-bar-track"><div class="verdict-bar-fill" style="width:0%" data-target="' + pct + '"></div></div><div class="verdict-bar-value">' + bar.value + '/10</div></div>';
-    });
-    html += '</div>';
-    if (vs.phrase) html += '<div class="venture-score-phrase">' + vs.phrase + '</div>';
-    html += '</div>';
-  }
+  if (!v) { verdictSection.style.display = "none"; return; }
+  let badgeClass = "caution";
+  if (v.verdict === "GO") badgeClass = "go"; else if (v.verdict === "NO-GO") badgeClass = "nogo";
+  let html = '<div class="verdict-top"><span class="verdict-badge ' + badgeClass + '">' + v.verdict + '</span></div>';
+  if (v.risk) html += '<div class="verdict-risk">Overall Risk: <strong>' + v.risk + '</strong></div>';
   verdictCard.innerHTML = html;
   verdictSection.style.display = "block";
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      verdictCard.querySelectorAll(".verdict-bar-fill").forEach(el => { el.style.width = el.dataset.target + "%"; });
-    }, 50);
-  });
 }
 
 function extractChartData(text, marker) {
@@ -1457,22 +1414,9 @@ function chartOptions(yTitle) {
 }
 
 function renderResearchCharts(sections) {
-  if (typeof Chart === "undefined") { chartsSection.style.display = "none"; return; }
   [marketChartInstance, competitorChartInstance, financialChartInstance].forEach(chart => { if (chart) chart.destroy(); });
   marketChartInstance = competitorChartInstance = financialChartInstance = null;
-  const market = extractChartData(sections.market_research, "MARKET_CHART_DATA");
-  const competitor = extractChartData(sections.competitor_analysis, "COMPETITOR_CHART_DATA");
-  const financial = extractChartData(sections.financial_analysis, "FINANCIAL_CHART_DATA");
-  marketChartCard.style.display = market ? "block" : "none";
-  competitorChartCard.style.display = competitor ? "block" : "none";
-  financialChartCard.style.display = financial ? "block" : "none";
-  chartsSection.style.display = market || competitor || financial ? "block" : "none";
-  if (market) marketChartInstance = new Chart(document.getElementById("marketChart"), { type: "line", data: { labels: market.years, datasets: [{ label: market.unit || "Market size", data: market.values, borderColor: "#7c9cff", backgroundColor: "rgba(124,156,255,.18)", fill: true, tension: .3 }] }, options: chartOptions(market.unit) });
-  if (competitor) {
-    const colors = ["#7c9cff", "#4ade80", "#fbbf24"];
-    competitorChartInstance = new Chart(document.getElementById("competitorChart"), { type: "radar", data: { labels: competitor.labels, datasets: competitor.competitors.slice(0, 3).map((item, index) => ({ label: item.name, data: item.scores, borderColor: colors[index], backgroundColor: colors[index] + "22", pointBackgroundColor: colors[index] })) }, options: { responsive: true, maintainAspectRatio: false, scales: { r: { min: 0, max: 10, ticks: { display: false }, angleLines: { color: "rgba(122,131,153,.25)" }, grid: { color: "rgba(122,131,153,.2)" }, pointLabels: { color: "#aeb6c8" } } }, plugins: { legend: { labels: { color: "#aeb6c8", boxWidth: 12 } } } } });
-  }
-  if (financial) financialChartInstance = new Chart(document.getElementById("financialChart"), { type: "line", data: { labels: financial.months.map(month => "M" + month), datasets: [{ label: "Revenue", data: financial.revenue, borderColor: "#4ade80", backgroundColor: "rgba(74,222,128,.12)", tension: .25 }, { label: "Expenses", data: financial.expenses, borderColor: "#f87171", backgroundColor: "rgba(248,113,113,.12)", tension: .25 }] }, options: chartOptions(financial.currency) });
+  chartsSection.style.display = "none";
 }
 
 function classifySource(url) {

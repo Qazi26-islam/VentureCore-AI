@@ -133,7 +133,7 @@ class PublicDemoTests(unittest.TestCase):
         sales = self.client.get("/sales/dashboard")
         finance = self.client.get("/finance/dashboard")
         history = self.client.get("/research/history")
-        self.assertEqual(len(inventory.json()), 5)
+        self.assertEqual(len(inventory.json()["items"]), 5)
         self.assertEqual(sales.status_code, 200, sales.text)
         self.assertGreater(sales.json()["orders_30d"], 0)
         self.assertEqual(finance.status_code, 200, finance.text)
@@ -144,7 +144,7 @@ class PublicDemoTests(unittest.TestCase):
             json={"email": "real-owner@example.com", "password": "strong-password"},
         )
         self.assertEqual(signup.status_code, 200, signup.text)
-        self.assertEqual(self.client.get("/inventory/dashboard").json(), [])
+        self.assertEqual(self.client.get("/inventory/dashboard").json()["items"], [])
         self.assertEqual(self.client.get("/sales/customers").json(), [])
         self.assertEqual(self.client.get("/research/history").json(), [])
         self.assertEqual(self._demo_counts()["products"], 5)

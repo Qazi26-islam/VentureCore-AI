@@ -1,0 +1,61 @@
+{
+  "as_of": "2026-01-31",
+  "lookback_days": 30,
+  "organization_id": 1,
+  "user": {"id": 700, "email": "eval-owner@example.invalid"},
+  "products": [
+    {"id": 701, "sku": "ALPHA", "name": "Alpha Drink", "unit_cost_minor": 600, "selling_price_minor": 1000, "reorder_point": 10, "lead_time_days": 7},
+    {"id": 702, "sku": "BETA", "name": "Beta Snack", "unit_cost_minor": 1000, "selling_price_minor": 1600, "reorder_point": 8, "lead_time_days": 5}
+  ],
+  "customers": [
+    {"id": 711, "name": "North Cafe"},
+    {"id": 712, "name": "South Market"}
+  ],
+  "inventory_transactions": [
+    {"id": 721, "product_id": 701, "transaction_type": "received", "quantity_change": 100, "created_at": "2025-12-20 09:00:00"},
+    {"id": 722, "product_id": 701, "transaction_type": "sold", "quantity_change": -20, "created_at": "2026-01-10 09:00:00"},
+    {"id": 723, "product_id": 701, "transaction_type": "sold", "quantity_change": -10, "created_at": "2026-01-20 09:00:00"},
+    {"id": 724, "product_id": 702, "transaction_type": "received", "quantity_change": 50, "created_at": "2025-12-20 09:00:00"},
+    {"id": 725, "product_id": 702, "transaction_type": "sold", "quantity_change": -12, "created_at": "2026-01-15 09:00:00"}
+  ],
+  "sales_orders": [
+    {"id": 731, "customer_id": 711, "product_id": 701, "quantity": 20, "unit_price_minor": 1000, "total_amount_minor": 20000, "payment_status": "paid", "due_date": null, "created_at": "2026-01-10 09:00:00"},
+    {"id": 732, "customer_id": 712, "product_id": 701, "quantity": 10, "unit_price_minor": 1000, "total_amount_minor": 10000, "payment_status": "due", "due_date": "2026-01-15", "created_at": "2026-01-20 09:00:00"},
+    {"id": 733, "customer_id": 711, "product_id": 702, "quantity": 12, "unit_price_minor": 1600, "total_amount_minor": 19200, "payment_status": "paid", "due_date": null, "created_at": "2026-01-15 09:00:00"}
+  ],
+  "finance_transactions": [
+    {"id": 741, "transaction_type": "income", "amount_minor": 20000, "category": "Sales Revenue", "transaction_date": "2026-01-10"},
+    {"id": 742, "transaction_type": "income", "amount_minor": 19200, "category": "Sales Revenue", "transaction_date": "2026-01-15"},
+    {"id": 743, "transaction_type": "expense", "amount_minor": 5000, "category": "Rent", "transaction_date": "2026-01-05"},
+    {"id": 744, "transaction_type": "expense", "amount_minor": 1000, "category": "Marketing", "transaction_date": "2026-01-12"},
+    {"id": 745, "transaction_type": "expense", "amount_minor": 2000, "category": "Marketing", "transaction_date": "2026-01-25"}
+  ],
+  "known_answers": {
+    "total_revenue_minor": {"value": 49200, "calculation": "20000 + 10000 + 19200"},
+    "gross_margin_minor_by_product": {
+      "Alpha Drink": {"value": 12000, "calculation": "30000 revenue - (30 units * 600 cost)"},
+      "Beta Snack": {"value": 7200, "calculation": "19200 revenue - (12 units * 1000 cost)"}
+    },
+    "stock_on_hand_by_product": {
+      "Alpha Drink": {"value": 70, "calculation": "100 received - 20 sold - 10 sold"},
+      "Beta Snack": {"value": 38, "calculation": "50 received - 12 sold"}
+    },
+    "days_of_cover_by_product": {
+      "Alpha Drink": {"value": 70.0, "calculation": "70 stock / (30 units / 30 days)"},
+      "Beta Snack": {"value": 95.0, "calculation": "38 stock / (12 units / 30 days)"}
+    },
+    "overdue_receivables_minor": {"value": 10000, "calculation": "order 732 was unpaid and due before 2026-01-31"},
+    "expense_totals_minor_by_category": {
+      "Rent": {"value": 5000, "calculation": "5000"},
+      "Marketing": {"value": 3000, "calculation": "1000 + 2000"}
+    }
+  },
+  "tool_selection_cases": [
+    {"question": "How many days until each product runs out?", "expected_tool": "get_inventory_snapshot", "recorded_tool": "get_inventory_snapshot"},
+    {"question": "What is our stock on hand?", "expected_tool": "get_inventory_snapshot", "recorded_tool": "get_inventory_snapshot"},
+    {"question": "What was revenue this month?", "expected_tool": "get_sales_snapshot", "recorded_tool": "get_sales_snapshot"},
+    {"question": "Which invoices are overdue?", "expected_tool": "get_sales_snapshot", "recorded_tool": "get_sales_snapshot"},
+    {"question": "How much did we spend by category?", "expected_tool": "get_finance_snapshot", "recorded_tool": "get_finance_snapshot"},
+    {"question": "What is our recorded cash position?", "expected_tool": "get_finance_snapshot", "recorded_tool": "get_finance_snapshot"}
+  ]
+}

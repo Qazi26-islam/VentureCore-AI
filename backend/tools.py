@@ -4,7 +4,7 @@ import logging
 import math
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 from google.genai import types
@@ -39,6 +39,13 @@ class SnapshotInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     lookback_days: int = Field(default=30, ge=1, le=365)
+    as_of: Optional[date] = None
+
+
+class FigureWorkings(BaseModel):
+    tool: str
+    inputs: dict[str, Any]
+    source_row_ids: dict[str, list[int]]
 
 
 class RecordSaleInput(BaseModel):
@@ -80,6 +87,7 @@ class InventoryItemOutput(BaseModel):
 class InventorySnapshotOutput(BaseModel):
     company_profile: Optional[dict[str, Any]]
     lookback_days: int
+    dashboard: dict[str, Any]
     items: list[InventoryItemOutput]
 
 
@@ -101,6 +109,7 @@ class FinanceSnapshotOutput(BaseModel):
     expense_categories: list[dict[str, Any]]
     outstanding_receivables: list[dict[str, Any]]
     inventory_commitments: dict[str, Any]
+    recent_transactions: list[dict[str, Any]]
 
 
 class RecordSaleOutput(BaseModel):
@@ -197,9 +206,30 @@ def _parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
 
 
+def _snapshot_as_of(body: SnapshotInput) -> datetime:
+    if body.as_of is not None:
+        return datetime.combine(body.as_of, time.max)
+    return datetime.now()
+
+
+def _workings(
+    tool: str,
+    body: SnapshotInput,
+    source_row_ids: dict[str, list[int]],
+) -> dict[str, Any]:
+    inputs: dict[str, Any] = {"lookback_days": body.lookback_days}
+    if body.as_of is not None:
+        inputs["as_of"] = body.as_of.isoformat()
+    return FigureWorkings(
+        tool=tool,
+        inputs=inputs,
+        source_row_ids=source_row_ids,
+    ).model_dump(mode="json")
+
+
 def _inventory_snapshot(context: ToolContext, body: SnapshotInput) -> InventorySnapshotOutput:
     connection = get_connection()
-    cutoff = datetime.now() - timedelta(days=body.lookback_days)
+    cutoff = _snapshot_as_of(body) - timedelta(days=body.lookback_days)
     try:
         products = connection.execute(
             """SELECT p.id, p.sku, p.name, p.category, p.unit_cost_minor,
@@ -279,9 +309,45 @@ def _inventory_snapshot(context: ToolContext, body: SnapshotInput) -> InventoryS
                     source_row_ids=source_ids,
                 )
             )
+        product_ids = [item.id for item in items]
+        transaction_ids = sorted(
+            {
+                row_id
+                for item in items
+                for row_id in item.source_row_ids.get("inventory_transactions", [])
+            }
+        )
+        all_sources = {"products": product_ids, "inventory_transactions": transaction_ids}
+        attention_items = [item for item in items if item.status != "Healthy"]
+        attention_sources = {
+            "products": [item.id for item in attention_items],
+            "inventory_transactions": sorted(
+                {
+                    row_id
+                    for item in attention_items
+                    for row_id in item.source_row_ids.get("inventory_transactions", [])
+                }
+            ),
+        }
+        dashboard = {
+            "products_count": len(items),
+            "inventory_value_minor": sum(item.inventory_value_minor for item in items),
+            "needs_attention": len(attention_items),
+            "estimated_reorder_cost_minor": sum(item.estimated_reorder_cost_minor for item in items),
+            "currency": next((item.currency for item in items), "MYR"),
+            "workings": {
+                "products_count": _workings("get_inventory_snapshot", body, {"products": product_ids}),
+                "inventory_value_minor": _workings("get_inventory_snapshot", body, all_sources),
+                "needs_attention": _workings("get_inventory_snapshot", body, attention_sources),
+                "estimated_reorder_cost_minor": _workings(
+                    "get_inventory_snapshot", body, attention_sources
+                ),
+            },
+        }
         return InventorySnapshotOutput(
             company_profile=_profile(connection, context),
             lookback_days=body.lookback_days,
+            dashboard=dashboard,
             items=items,
         )
     finally:
@@ -290,14 +356,15 @@ def _inventory_snapshot(context: ToolContext, body: SnapshotInput) -> InventoryS
 
 def _sales_snapshot(context: ToolContext, body: SnapshotInput) -> SalesSnapshotOutput:
     connection = get_connection()
-    cutoff = datetime.now() - timedelta(days=body.lookback_days)
+    as_of = _snapshot_as_of(body)
+    cutoff = as_of - timedelta(days=body.lookback_days)
     try:
         orders = connection.execute(
             """SELECT s.id, s.customer_id, s.product_id, s.quantity,
                       s.unit_price_minor, s.total_amount_minor, s.currency,
                       s.payment_status, s.due_date, s.created_at,
                       c.name AS customer_name, c.segment AS customer_segment,
-                      p.name AS product_name
+                      p.name AS product_name, p.unit_cost_minor
                  FROM sales_orders s
                  JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
                  LEFT JOIN customers c ON c.id = s.customer_id AND c.organization_id = s.organization_id
@@ -314,22 +381,54 @@ def _sales_snapshot(context: ToolContext, body: SnapshotInput) -> SalesSnapshotO
         currency = next((row["currency"] for row in orders), "MYR")
         recent_ids = [int(row["id"]) for row in recent]
         unpaid = [row for row in orders if row["payment_status"] != "paid"]
+        as_of_date = as_of.date().isoformat()
+        overdue = [
+            row for row in unpaid if row["due_date"] is not None and row["due_date"] < as_of_date
+        ]
+        recent_by_customer: dict[int, list[sqlite3.Row]] = {}
+        for order in recent:
+            if order["customer_id"] is not None:
+                recent_by_customer.setdefault(int(order["customer_id"]), []).append(order)
+        top_customer_orders = max(
+            recent_by_customer.values(),
+            key=lambda rows: sum(int(row["total_amount_minor"]) for row in rows),
+            default=[],
+        )
         dashboard = {
             "revenue_minor": sum(int(row["total_amount_minor"]) for row in recent),
             "cash_collected_minor": sum(
                 int(row["total_amount_minor"]) for row in recent if row["payment_status"] == "paid"
             ),
             "outstanding_amount_minor": sum(int(row["total_amount_minor"]) for row in unpaid),
+            "overdue_receivables_minor": sum(int(row["total_amount_minor"]) for row in overdue),
             "currency": currency,
             "orders": len(recent),
+            "top_customer": top_customer_orders[0]["customer_name"] if top_customer_orders else None,
             "source_row_ids": {
                 "revenue_minor": recent_ids,
                 "cash_collected_minor": [
                     int(row["id"]) for row in recent if row["payment_status"] == "paid"
                 ],
                 "outstanding_amount_minor": [int(row["id"]) for row in unpaid],
+                "overdue_receivables_minor": [int(row["id"]) for row in overdue],
             },
         }
+        dashboard["workings"] = {
+            key: _workings(
+                "get_sales_snapshot",
+                body,
+                {"sales_orders": dashboard["source_row_ids"].get(key, [])},
+            )
+            for key in (
+                "revenue_minor",
+                "cash_collected_minor",
+                "outstanding_amount_minor",
+                "overdue_receivables_minor",
+            )
+        }
+        dashboard["workings"]["orders"] = _workings(
+            "get_sales_snapshot", body, {"sales_orders": recent_ids}
+        )
         customer_performance = []
         for customer in customers:
             customer_orders = [row for row in orders if row["customer_id"] == customer["id"]]
@@ -361,6 +460,11 @@ def _sales_snapshot(context: ToolContext, body: SnapshotInput) -> SalesSnapshotO
                 "name": product_orders[0]["product_name"],
                 "units_sold": sum(float(row["quantity"]) for row in product_orders),
                 "revenue_minor": sum(int(row["total_amount_minor"]) for row in product_orders),
+                "gross_margin_minor": sum(
+                    int(row["total_amount_minor"])
+                    - multiply_minor(int(row["unit_cost_minor"]), float(row["quantity"]))
+                    for row in product_orders
+                ),
                 "currency": product_orders[0]["currency"],
                 "source_row_ids": {
                     "products": [product_id],
@@ -369,7 +473,6 @@ def _sales_snapshot(context: ToolContext, body: SnapshotInput) -> SalesSnapshotO
             }
             for product_id, product_orders in product_groups.items()
         ]
-        today = datetime.now().date().isoformat()
         outstanding = [
             {
                 "id": int(row["id"]),
@@ -378,7 +481,7 @@ def _sales_snapshot(context: ToolContext, body: SnapshotInput) -> SalesSnapshotO
                 "total_amount_minor": int(row["total_amount_minor"]),
                 "currency": row["currency"],
                 "due_date": row["due_date"],
-                "status": "overdue" if row["due_date"] and row["due_date"] < today else "due",
+                "status": "overdue" if row["due_date"] and row["due_date"] < as_of_date else "due",
                 "source_row_ids": {"sales_orders": [int(row["id"])]},
             }
             for row in unpaid
@@ -409,7 +512,8 @@ def _sales_snapshot(context: ToolContext, body: SnapshotInput) -> SalesSnapshotO
 
 def _finance_snapshot(context: ToolContext, body: SnapshotInput) -> FinanceSnapshotOutput:
     connection = get_connection()
-    cutoff = (datetime.now() - timedelta(days=body.lookback_days)).date().isoformat()
+    as_of = _snapshot_as_of(body)
+    cutoff = (as_of - timedelta(days=body.lookback_days)).date().isoformat()
     try:
         transactions = connection.execute(
             """SELECT id, transaction_type, amount_minor, currency, category,
@@ -451,12 +555,29 @@ def _finance_snapshot(context: ToolContext, body: SnapshotInput) -> FinanceSnaps
                 "receivables_minor": [int(row["id"]) for row in receivables],
             },
         }
+        dashboard["workings"] = {
+            key: _workings(
+                "get_finance_snapshot",
+                body,
+                {
+                    ("sales_orders" if key == "receivables_minor" else "finance_transactions"):
+                        dashboard["source_row_ids"].get(key, [])
+                },
+            )
+            for key in (
+                "income_minor",
+                "expenses_minor",
+                "net_cash_flow_minor",
+                "recorded_cash_balance_minor",
+                "receivables_minor",
+            )
+        }
         monthly: dict[str, list[sqlite3.Row]] = {}
         categories: dict[str, list[sqlite3.Row]] = {}
         for transaction in transactions:
             monthly.setdefault(transaction["transaction_date"][:7], []).append(transaction)
-            if transaction["transaction_type"] == "expense":
-                categories.setdefault(transaction["category"] or "Other", []).append(transaction)
+        for transaction in expenses_recent:
+            categories.setdefault(transaction["category"] or "Other", []).append(transaction)
         monthly_cash_flow = [
             {
                 "month": month,
@@ -513,6 +634,15 @@ def _finance_snapshot(context: ToolContext, body: SnapshotInput) -> FinanceSnaps
                 "currency": currency,
                 "source_row_ids": commitment_ids,
             },
+            recent_transactions=[
+                {
+                    **dict(row),
+                    "category": row["category"] or "Other",
+                    "description": row["description"] or "",
+                    "source_row_ids": {"finance_transactions": [int(row["id"])]},
+                }
+                for row in transactions[:30]
+            ],
         )
     finally:
         connection.close()

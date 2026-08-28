@@ -29,9 +29,7 @@ BASE_PROMPT = (
     "table, or the Financial Analysis section includes a scenario table "
     "(Worst/Base/Best case), preserve those tables EXACTLY as given — do "
     "not remove, reformat, or summarize them away. If a section includes a "
-    "'**Sources:**' list, preserve it exactly as given too. Preserve any "
-    "MARKET_CHART_DATA, COMPETITOR_CHART_DATA, and FINANCIAL_CHART_DATA lines "
-    "exactly as supplied; never put them inside a code fence. After each "
+    "'**Sources:**' list, preserve it exactly as given too. After each "
     "section, place a horizontal divider on its own line using exactly "
     "three dashes (---).\n\n"
     "After the agent sections and a divider, add a '**SWOT Analysis:**' "
@@ -59,7 +57,7 @@ VALIDATOR_ADDON = (
     "Discuss demand, competition, profitability, scalability, and risk qualitatively. "
     "Then add a bolded verdict phrase such as '**Promising opportunity "
     "— proceed with validation.**' or '**High risk — needs significant "
-    "de-risking before proceeding.**' matching the actual scores."
+    "de-risking before proceeding.**' matching the qualitative evidence."
 )
 
 def run(question: str, market: str, competitor: str, financial: str, mode: str = "market", depth: str = "standard") -> str:

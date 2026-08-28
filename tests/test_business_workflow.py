@@ -76,8 +76,12 @@ class BusinessWorkflowTests(unittest.TestCase):
 
         inventory = self.client.get("/inventory/dashboard")
         self.assertEqual(inventory.status_code, 200, inventory.text)
-        self.assertEqual(inventory.json()[0]["current_stock"], 8)
-        self.assertEqual(inventory.json()[0]["inventory_value_minor"], 2_000)
+        self.assertEqual(inventory.json()["items"][0]["current_stock"], 8)
+        self.assertEqual(inventory.json()["items"][0]["inventory_value_minor"], 2_000)
+        self.assertEqual(
+            inventory.json()["workings"]["inventory_value_minor"]["tool"],
+            "get_inventory_snapshot",
+        )
 
         sales = self.client.get("/sales/dashboard")
         self.assertEqual(sales.status_code, 200, sales.text)

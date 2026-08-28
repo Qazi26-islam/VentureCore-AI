@@ -4,7 +4,6 @@ import io
 import threading
 import re
 import csv
-import math
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
@@ -25,6 +24,7 @@ from backend.models.schemas import (
     CompanyProfileRequest, CompanyProfileResponse,
     DataQualityResponse,
     SupplierRequest, SupplierItem, ProductRequest, StockMovementRequest, InventoryItem,
+    InventoryDashboardResponse,
     InventoryQuestionRequest, InventoryQuestionResponse,
     CustomerRequest, CustomerItem, SaleRequest, SaleRecord, SalesDashboardResponse,
     SalesQuestionRequest, SalesQuestionResponse,
@@ -41,7 +41,6 @@ from backend.db import (
     get_connection,
     get_demo_user_id,
 )
-from backend.money import multiply_minor
 from backend.tools import ToolContext, invoke_tool
 
 router = APIRouter()
@@ -333,62 +332,29 @@ def record_stock_movement(product_id: int, body: StockMovementRequest, request: 
     return {"id": cursor.lastrowid, "current_stock": current_stock + quantity_change, "status": "recorded"}
 
 
-@router.get("/inventory/dashboard", response_model=list[InventoryItem])
+@router.get("/inventory/dashboard", response_model=InventoryDashboardResponse)
 def inventory_dashboard(request: Request):
     user_id = require_login(request)
     organization_id = get_organization_id(request)
-    conn = get_connection()
-    rows = conn.execute(
-        """SELECT p.*, s.name AS supplier_name,
-                  COALESCE(SUM(t.quantity_change), 0) AS current_stock,
-                  COALESCE(SUM(CASE
-                      WHEN t.transaction_type = 'sold'
-                       AND t.created_at >= datetime('now', '-30 days')
-                      THEN ABS(t.quantity_change) ELSE 0 END), 0) AS units_sold_30d
-           FROM products p
-           LEFT JOIN suppliers s ON s.id = p.supplier_id AND s.organization_id = p.organization_id
-           LEFT JOIN inventory_transactions t ON t.product_id = p.id AND t.organization_id = p.organization_id
-           WHERE p.user_id = ? AND p.organization_id = ? AND p.active = 1
-           GROUP BY p.id
-           ORDER BY current_stock <= p.reorder_point DESC, p.name ASC""",
-        (user_id, organization_id),
-    ).fetchall()
-    conn.close()
-    result = []
-    for row in rows:
-        stock = float(row["current_stock"])
-        units_sold_30d = float(row["units_sold_30d"])
-        average_daily_sales = units_sold_30d / 30
-        days_of_stock = round(stock / average_daily_sales, 1) if average_daily_sales > 0 else None
-        lead_time_days = int(row["lead_time_days"] or 0)
-        reorder_point = float(row["reorder_point"] or 0)
-
-        demand_target = math.ceil(average_daily_sales * (lead_time_days + 14))
-        minimum_target = math.ceil(reorder_point * 2)
-        target_stock = max(demand_target, minimum_target)
-        recommended_reorder_quantity = max(0, math.ceil(target_stock - stock))
-
-        if stock <= 0:
-            status = "Out of stock"
-        elif stock <= reorder_point or (days_of_stock is not None and days_of_stock <= lead_time_days):
-            status = "Reorder now"
-        elif days_of_stock is not None and days_of_stock <= lead_time_days + 7:
-            status = "Order soon"
-        else:
-            status = "Healthy"
-        result.append(InventoryItem(
-            id=row["id"], sku=row["sku"] or "", name=row["name"], category=row["category"] or "",
-            current_stock=stock, unit_cost_minor=row["unit_cost_minor"],
-            selling_price_minor=row["selling_price_minor"],
-            inventory_value_minor=multiply_minor(row["unit_cost_minor"], stock), currency=row["currency"],
-            reorder_point=reorder_point,
-            lead_time_days=lead_time_days, supplier_name=row["supplier_name"],
-            units_sold_30d=round(units_sold_30d, 2), average_daily_sales=round(average_daily_sales, 2),
-            days_of_stock=days_of_stock, recommended_reorder_quantity=recommended_reorder_quantity,
-            estimated_reorder_cost_minor=row["unit_cost_minor"] * recommended_reorder_quantity,
-            status=status,
-        ))
-    return result
+    result = invoke_tool(
+        "get_inventory_snapshot",
+        ToolContext(organization_id=organization_id, user_id=user_id),
+        {"lookback_days": 30},
+    )
+    if not result.ok:
+        raise HTTPException(status_code=500, detail="Could not calculate inventory metrics.")
+    data = result.data or {}
+    dashboard = data["dashboard"]
+    items = [
+        InventoryItem(
+            **{
+                **item,
+                "units_sold_30d": item["units_sold"],
+            }
+        )
+        for item in data["items"]
+    ]
+    return InventoryDashboardResponse(**dashboard, items=items)
 
 
 @router.post("/inventory/ask", response_model=InventoryQuestionResponse)
@@ -503,46 +469,25 @@ def mark_sale_paid(sale_id: int, request: Request):
 def sales_dashboard(request: Request):
     user_id = require_login(request)
     organization_id = get_organization_id(request)
-    conn = get_connection()
-    totals = conn.execute(
-        """SELECT
-             COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-30 days') THEN total_amount_minor ELSE 0 END), 0) AS revenue_30d_minor,
-             COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-30 days') AND payment_status = 'paid' THEN total_amount_minor ELSE 0 END), 0) AS cash_collected_30d_minor,
-             COALESCE(SUM(CASE WHEN payment_status != 'paid' THEN total_amount_minor ELSE 0 END), 0) AS outstanding_amount_minor,
-             COALESCE(MAX(currency), 'MYR') AS currency,
-             SUM(CASE WHEN created_at >= datetime('now', '-30 days') THEN 1 ELSE 0 END) AS orders_30d
-           FROM sales_orders WHERE user_id = ? AND organization_id = ?""",
-        (user_id, organization_id),
-    ).fetchone()
-    top_customer_row = conn.execute(
-        """SELECT c.name, SUM(s.total_amount_minor) AS total_minor
-           FROM sales_orders s JOIN customers c ON c.id = s.customer_id AND c.organization_id = s.organization_id
-           WHERE s.user_id = ? AND s.organization_id = ? AND s.created_at >= datetime('now', '-30 days')
-           GROUP BY c.id ORDER BY total_minor DESC LIMIT 1""",
-        (user_id, organization_id),
-    ).fetchone()
-    rows = conn.execute(
-        """SELECT s.id, c.name AS customer_name, p.name AS product_name, s.quantity,
-                  s.unit_price_minor, s.total_amount_minor, s.currency,
-                  CASE WHEN s.payment_status != 'paid' AND s.due_date IS NOT NULL
-                         AND date(s.due_date) < date('now') THEN 'overdue'
-                       ELSE s.payment_status END AS payment_status,
-                  s.due_date, s.created_at
-           FROM sales_orders s
-           JOIN products p ON p.id = s.product_id AND p.organization_id = s.organization_id
-           LEFT JOIN customers c ON c.id = s.customer_id AND c.organization_id = s.organization_id
-           WHERE s.user_id = ? AND s.organization_id = ? ORDER BY s.created_at DESC, s.id DESC LIMIT 20""",
-        (user_id, organization_id),
-    ).fetchall()
-    conn.close()
+    result = invoke_tool(
+        "get_sales_snapshot",
+        ToolContext(organization_id=organization_id, user_id=user_id),
+        {"lookback_days": 30},
+    )
+    if not result.ok:
+        raise HTTPException(status_code=500, detail="Could not calculate sales metrics.")
+    data = result.data or {}
+    dashboard = data["dashboard"]
     return SalesDashboardResponse(
-        revenue_30d_minor=int(totals["revenue_30d_minor"]),
-        cash_collected_30d_minor=int(totals["cash_collected_30d_minor"]),
-        outstanding_amount_minor=int(totals["outstanding_amount_minor"]),
-        currency=totals["currency"],
-        orders_30d=int(totals["orders_30d"] or 0),
-        top_customer=top_customer_row["name"] if top_customer_row else None,
-        recent_sales=[SaleRecord(**dict(row)) for row in rows],
+        revenue_30d_minor=dashboard["revenue_minor"],
+        cash_collected_30d_minor=dashboard["cash_collected_minor"],
+        outstanding_amount_minor=dashboard["outstanding_amount_minor"],
+        overdue_receivables_minor=dashboard["overdue_receivables_minor"],
+        currency=dashboard["currency"],
+        orders_30d=dashboard["orders"],
+        top_customer=dashboard["top_customer"],
+        workings=dashboard["workings"],
+        recent_sales=[SaleRecord(**row) for row in data["recent_sales"]],
     )
 
 
@@ -591,46 +536,36 @@ def create_finance_transaction(body: FinanceTransactionRequest, request: Request
 def finance_dashboard(request: Request):
     user_id = require_login(request)
     organization_id = get_organization_id(request)
-    conn = get_connection()
-    totals = conn.execute(
-        """SELECT
-             COALESCE(SUM(CASE WHEN transaction_type = 'income' AND transaction_date >= date('now', '-30 days') THEN amount_minor ELSE 0 END), 0) AS income_30d_minor,
-             COALESCE(SUM(CASE WHEN transaction_type = 'expense' AND transaction_date >= date('now', '-30 days') THEN amount_minor ELSE 0 END), 0) AS expenses_30d_minor,
-             COALESCE(SUM(CASE WHEN transaction_type = 'income' THEN amount_minor ELSE -amount_minor END), 0) AS cash_balance_minor,
-             COALESCE(MAX(currency), 'MYR') AS currency
-           FROM finance_transactions WHERE user_id = ? AND organization_id = ?""",
-        (user_id, organization_id),
-    ).fetchone()
-    receivables = conn.execute(
-        """SELECT COALESCE(SUM(total_amount_minor), 0) FROM sales_orders
-           WHERE user_id = ? AND organization_id = ? AND payment_status != 'paid'""",
-        (user_id, organization_id),
-    ).fetchone()[0]
-    categories = conn.execute(
-        """SELECT COALESCE(category, 'Other') AS category, SUM(amount_minor) AS total_minor
-           FROM finance_transactions
-           WHERE user_id = ? AND organization_id = ? AND transaction_type = 'expense'
-             AND transaction_date >= date('now', '-30 days')
-           GROUP BY category ORDER BY total_minor DESC""",
-        (user_id, organization_id),
-    ).fetchall()
-    rows = conn.execute(
-        """SELECT id, transaction_type, amount_minor, currency, COALESCE(category, 'Other') AS category,
-                  COALESCE(description, '') AS description, source, transaction_date
-           FROM finance_transactions WHERE user_id = ? AND organization_id = ?
-           ORDER BY transaction_date DESC, id DESC LIMIT 30""",
-        (user_id, organization_id),
-    ).fetchall()
-    conn.close()
-    income_30d_minor = int(totals["income_30d_minor"])
-    expenses_30d_minor = int(totals["expenses_30d_minor"])
+    result = invoke_tool(
+        "get_finance_snapshot",
+        ToolContext(organization_id=organization_id, user_id=user_id),
+        {"lookback_days": 30},
+    )
+    if not result.ok:
+        raise HTTPException(status_code=500, detail="Could not calculate finance metrics.")
+    data = result.data or {}
+    dashboard = data["dashboard"]
+    expense_workings = {
+        item["category"]: {
+            "tool": "get_finance_snapshot",
+            "inputs": {"lookback_days": 30},
+            "source_row_ids": item["source_row_ids"],
+        }
+        for item in data["expense_categories"]
+    }
     return FinanceDashboardResponse(
-        income_30d_minor=income_30d_minor, expenses_30d_minor=expenses_30d_minor,
-        net_cash_flow_30d_minor=income_30d_minor - expenses_30d_minor,
-        cash_balance_minor=int(totals["cash_balance_minor"]), receivables_minor=int(receivables),
-        currency=totals["currency"],
-        expense_breakdown_30d_minor={row["category"]: int(row["total_minor"]) for row in categories},
-        recent_transactions=[FinanceTransactionItem(**dict(row)) for row in rows],
+        income_30d_minor=dashboard["income_minor"],
+        expenses_30d_minor=dashboard["expenses_minor"],
+        net_cash_flow_30d_minor=dashboard["net_cash_flow_minor"],
+        cash_balance_minor=dashboard["recorded_cash_balance_minor"],
+        receivables_minor=dashboard["receivables_minor"],
+        currency=dashboard["currency"],
+        expense_breakdown_30d_minor={
+            item["category"]: item["amount_minor"] for item in data["expense_categories"]
+        },
+        workings=dashboard["workings"],
+        expense_workings=expense_workings,
+        recent_transactions=[FinanceTransactionItem(**row) for row in data["recent_transactions"]],
     )
 
 

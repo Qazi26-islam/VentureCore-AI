@@ -47,3 +47,6 @@ minor-unit boundary.
 python -m unittest discover -s tests -v
 ruff check backend tests
 ```
+
+The normal test discovery command includes the offline numeric agent evaluations in
+`tests/test_agent_evals.py`; they use the committed deterministic fixture and do not call Gemini.

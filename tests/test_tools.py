@@ -377,7 +377,7 @@ class AgentToolIntegrationTests(unittest.TestCase):
         self.assertEqual(len(fake_client.models.calls), 2)
 
     def test_prompt_definitions_contain_no_sql_arithmetic_or_numeric_thresholds(self):
-        from backend.agents import competitor, financial, market_research, opportunity_finder, synthesis
+        from backend.agents import competitor, financial, followup, market_research, opportunity_finder, synthesis
 
         modules = (
             inventory,
@@ -388,6 +388,7 @@ class AgentToolIntegrationTests(unittest.TestCase):
             market_research,
             opportunity_finder,
             synthesis,
+            followup,
         )
         forbidden_words = ("select ", "insert ", "update ", "delete ", "sum(", "avg(")
         for module in modules:

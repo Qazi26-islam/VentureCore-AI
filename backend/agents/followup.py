@@ -14,7 +14,9 @@ SYSTEM_PROMPT = (
     "colon (e.g. '**Market Research:**'). If the follow-up asks about "
     "something not covered in the report, use your general business "
     "knowledge to help, but be clear when you're going beyond the "
-    "original report."
+    "original report. Never calculate a figure or introduce a new numeric "
+    "claim. You may repeat a quantitative fact only when it already appears "
+    "in the supplied report with its source."
 )
 
 

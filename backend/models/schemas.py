@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 class ResearchRequest(BaseModel):
@@ -177,6 +177,23 @@ class InventoryItem(BaseModel):
     recommended_reorder_quantity: int
     estimated_reorder_cost_minor: int
     status: str
+    source_row_ids: Dict[str, List[int]] = Field(default_factory=dict)
+
+
+class FigureWorkings(BaseModel):
+    tool: str
+    inputs: Dict[str, Any]
+    source_row_ids: Dict[str, List[int]]
+
+
+class InventoryDashboardResponse(BaseModel):
+    products_count: int
+    inventory_value_minor: int
+    needs_attention: int
+    estimated_reorder_cost_minor: int
+    currency: str
+    workings: Dict[str, FigureWorkings]
+    items: List[InventoryItem]
 
 
 class InventoryQuestionRequest(BaseModel):
@@ -221,15 +238,18 @@ class SaleRecord(BaseModel):
     payment_status: str
     due_date: Optional[str] = None
     created_at: str
+    source_row_ids: Dict[str, List[int]] = Field(default_factory=dict)
 
 
 class SalesDashboardResponse(BaseModel):
     revenue_30d_minor: int
     cash_collected_30d_minor: int
     outstanding_amount_minor: int
+    overdue_receivables_minor: int
     currency: str
     orders_30d: int
     top_customer: Optional[str] = None
+    workings: Dict[str, FigureWorkings]
     recent_sales: List[SaleRecord]
 
 
@@ -259,6 +279,7 @@ class FinanceTransactionItem(BaseModel):
     description: str
     source: str
     transaction_date: str
+    source_row_ids: Dict[str, List[int]] = Field(default_factory=dict)
 
 
 class FinanceDashboardResponse(BaseModel):
@@ -269,6 +290,8 @@ class FinanceDashboardResponse(BaseModel):
     receivables_minor: int
     currency: str
     expense_breakdown_30d_minor: Dict[str, int]
+    workings: Dict[str, FigureWorkings]
+    expense_workings: Dict[str, FigureWorkings]
     recent_transactions: List[FinanceTransactionItem]
 
 
