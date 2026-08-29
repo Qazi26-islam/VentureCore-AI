@@ -1,0 +1,43 @@
+{
+  "measured_at_utc": "2026-08-29T01:57:35.777281+00:00",
+  "environment": "local offline fixture; Python 3.9.6; arm64",
+  "runs": 30,
+  "model_network_calls": 0,
+  "overall": {
+    "median_latency_ms": 5,
+    "p95_latency_ms": 21,
+    "min_latency_ms": 4,
+    "max_latency_ms": 34,
+    "recorded_cost_minor_total": 0
+  },
+  "by_agent": {
+    "Finance & Cash Flow Agent": {
+      "runs": 10,
+      "median_latency_ms": 5,
+      "p95_latency_ms": 6,
+      "min_latency_ms": 4,
+      "max_latency_ms": 6,
+      "recorded_cost_minor_per_run": [0]
+    },
+    "Inventory Agent": {
+      "runs": 10,
+      "median_latency_ms": 5,
+      "p95_latency_ms": 21,
+      "min_latency_ms": 5,
+      "max_latency_ms": 21,
+      "recorded_cost_minor_per_run": [0]
+    },
+    "Sales & CRM Agent": {
+      "runs": 10,
+      "median_latency_ms": 4,
+      "p95_latency_ms": 34,
+      "min_latency_ms": 4,
+      "max_latency_ms": 34,
+      "recorded_cost_minor_per_run": [0]
+    }
+  },
+  "notes": [
+    "Latency is wall-clock T5 trace latency for recorded offline agent runs.",
+    "Recorded clients expose no provider token accounting; with the empty local pricing map, T5 records zero cost. This is not a production Gemini cost benchmark."
+  ]
+}

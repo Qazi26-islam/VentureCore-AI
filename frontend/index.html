@@ -52,6 +52,12 @@
   .brand-name { text-align: center; font-size: 15px; font-weight: 800; letter-spacing: -0.2px; color: var(--text); margin-bottom: 16px; flex-shrink: 0; }
   .sidebar-user { font-size: 12px; color: var(--muted); padding: 0 4px 14px; border-bottom: 1px solid var(--border); margin-bottom: 14px; word-break: break-all; flex-shrink: 0; }
   .sidebar-user .email { color: var(--text); font-weight: 600; display: block; margin-bottom: 6px; }
+  .primary-nav-label, .more-nav summary { padding:8px 6px; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+  .more-nav { margin-top:10px; padding-top:8px; border-top:1px solid var(--border); }
+  .more-nav summary { cursor:pointer; list-style:none; display:flex; justify-content:space-between; align-items:center; }
+  .more-nav summary::-webkit-details-marker { display:none; }
+  .more-nav summary::after { content:"+"; font-size:14px; }
+  .more-nav[open] summary::after { content:"−"; }
   .logout-btn { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 11px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
   .logout-btn:hover { color: var(--text); border-color: var(--muted); }
   .new-research-btn { width: 100%; padding: 7px; border-radius: 8px; border: 1px dashed var(--border); background: none; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 12px; flex-shrink: 0; }
@@ -632,15 +638,19 @@
         <span class="email" id="userEmail">-</span>
         <button class="logout-btn" id="logoutBtn">Log out</button>
       </div>
-      <button class="new-research-btn" id="newResearchBtn">+ New Research</button>
       <button class="demo-entry-btn" id="demoViewBtn">View demo workspace</button>
-      <button class="company-btn" id="companyProfileBtn">My Company</button>
+      <div class="primary-nav-label">Workspace</div>
       <button class="inventory-btn" id="inventoryOpenBtn">Inventory</button>
-      <button class="sales-btn" id="salesOpenBtn">Sales &amp; CRM</button>
       <button class="finance-btn" id="financeOpenBtn">Finance &amp; Cash Flow</button>
-      <button class="data-btn" id="shopifyOpenBtn">Shopify Sync</button>
-      <button class="data-btn" id="briefingOpenBtn">Email Briefings</button>
-      <button class="data-btn" id="dataCheckOpenBtn">Check Business Data</button>
+      <button class="data-btn" id="briefingOpenBtn">Executive Briefing</button>
+      <details class="more-nav" id="moreNav">
+        <summary>More</summary>
+        <button class="new-research-btn" id="newResearchBtn">+ New Research</button>
+        <button class="company-btn" id="companyProfileBtn">My Company</button>
+        <button class="sales-btn" id="salesOpenBtn">Sales &amp; CRM</button>
+        <button class="data-btn" id="shopifyOpenBtn">Shopify Sync</button>
+        <button class="data-btn" id="dataCheckOpenBtn">Check Business Data</button>
+      </details>
       <input type="text" class="history-search" id="historySearch" placeholder="Search research...">
       <div class="history-label">
         <span>History</span>
@@ -823,6 +833,7 @@ const sidebar = document.getElementById("sidebar");
 const sidebarToggle = document.getElementById("sidebarToggle");
 const sidebarBackdrop = document.getElementById("sidebarBackdrop");
 const sidebarUserBlock = document.getElementById("sidebarUserBlock");
+const moreNav = document.getElementById("moreNav");
 const guestNote = document.getElementById("guestNote");
 const guestLoginLink = document.getElementById("guestLoginLink");
 const userEmailEl = document.getElementById("userEmail");
@@ -1646,6 +1657,7 @@ function enterGuestMode() {
   demoViewBtn.style.display = "block";
   setDemoReadOnly(false);
   sidebarUserBlock.style.display = "none";
+  moreNav.style.display = "none";
   document.querySelector(".history-search").style.display = "none";
   document.querySelector(".history-label").style.display = "none";
   historyList.style.display = "none";
@@ -1668,6 +1680,7 @@ async function enterDemoMode(openDashboard = false) {
   demoBanner.style.display = "flex";
   demoViewBtn.style.display = "none";
   sidebarUserBlock.style.display = "block";
+  moreNav.style.display = "block";
   guestNote.style.display = "none";
   document.querySelector(".history-search").style.display = "block";
   document.querySelector(".history-label").style.display = "flex";
@@ -1679,7 +1692,7 @@ async function enterDemoMode(openDashboard = false) {
   salesOpenBtn.style.display = "block";
   financeOpenBtn.style.display = "block";
   shopifyOpenBtn.style.display = "none";
-  briefingOpenBtn.style.display = "none";
+  briefingOpenBtn.style.display = "block";
   dataCheckOpenBtn.style.display = "block";
   companyUseRow.style.display = "none";
   setDemoReadOnly(true);
@@ -1716,6 +1729,7 @@ async function afterLogin(email) {
   logoutBtn.textContent = "Log out";
   setDemoReadOnly(false);
   sidebarUserBlock.style.display = "block";
+  moreNav.style.display = "block";
   guestNote.style.display = "none";
   document.querySelector(".history-search").style.display = "block";
   document.querySelector(".history-label").style.display = "flex";
@@ -1784,6 +1798,21 @@ shopifyDisconnectBtn.addEventListener("click", async () => {
 
 briefingOpenBtn.addEventListener("click", async () => {
   briefingStatus.style.display = "none";
+  const briefingControls = [briefingEnabled, briefingEmail, briefingTimezone, briefingHour, briefingQuietStart, briefingQuietEnd, briefingSaveBtn];
+  if (isDemo) {
+    briefingEnabled.checked = true;
+    briefingEmail.value = "owner@example.invalid";
+    briefingTimezone.value = "Asia/Kuala_Lumpur";
+    briefingHour.value = 8;
+    briefingQuietStart.value = "22:00";
+    briefingQuietEnd.value = "07:00";
+    briefingControls.forEach(control => { control.disabled = true; });
+    briefingStatus.style.display = "block";
+    briefingStatus.textContent = "Sample delivery preferences are read-only in the demo workspace.";
+    briefingModalOverlay.classList.add("visible");
+    return;
+  }
+  briefingControls.forEach(control => { control.disabled = false; });
   const response = await fetch("/briefings/preferences");
   const data = await response.json().catch(() => ({}));
   if (!response.ok) { alert(data.detail || "Briefing preferences are unavailable."); return; }

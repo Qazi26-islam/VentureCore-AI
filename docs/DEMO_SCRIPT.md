@@ -1,0 +1,11 @@
+# VentureCore AI — two-minute engineering demo
+
+| Time | Shot | Narration |
+|---|---|---|
+| 0:00–0:12 | Open the root URL. Click **View demo workspace**; keep the sample-data banner visible. | “VentureCore is a tenant-scoped business-intelligence workspace. This public demo uses a fictional company, needs no account, and is read-only.” |
+| 0:12–0:27 | Pause on the sidebar: Inventory, Finance, Executive Briefing. Open and close **More** to reveal Research, Company, Sales, Shopify, and Data Check. | “The main operating surface is intentionally narrow. Secondary capabilities still exist, but they do not compete with the three workflows an owner checks most often.” |
+| 0:27–0:48 | Open **Inventory**. Point to inventory value, attention count, stock levels, days of cover, and reorder recommendations. | “Inventory is calculated from product and movement rows. The tool derives current stock, sales velocity, days of cover, and reorder requirements—none of these numbers is model arithmetic.” |
+| 0:48–1:08 | Open **Finance & Cash Flow**. Point to cash balance, income, expenses, receivables, and category breakdown. | “Finance combines recorded cash movements, outstanding sales, and inventory commitments. Money is stored as integer minor units with an ISO currency, then formatted only here in the presentation layer.” |
+| 1:08–1:25 | Click **Executive Briefing**. Show delivery toggle, timezone, briefing time, and quiet hours without saving in demo mode. | “The scheduled worker produces one cached briefing per organisation and period, sends only material threshold crossings, respects quiet hours, and prevents duplicate delivery.” |
+| 1:25–1:42 | Open **More**, then **Shopify Sync** or **Check Business Data**. Briefly show the integration surface. | “Data can arrive manually, from validated files, or through Shopify’s OAuth, backfill, webhook, and reconciliation flow. Every imported record carries its tenant and source identity.” |
+| 1:42–2:00 | Return to Inventory or Finance. Expand **Show workings** on a headline figure and hold on tool name, inputs, and source-row identifiers. | “This is the differentiator: every headline number exposes the deterministic tool, its inputs, and the exact rows it aggregated. The model can explain a result, but VentureCore can prove where the number came from.” |

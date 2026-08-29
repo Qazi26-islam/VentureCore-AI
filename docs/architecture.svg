@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760" role="img" aria-labelledby="title desc">
+  <title id="title">VentureCore AI architecture</title>
+  <desc id="desc">Data sources flow through authenticated ingestion into a tenant-scoped SQLite store, typed deterministic tools, AI orchestration and scheduled briefings, with traceability throughout.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1020"/><stop offset="1" stop-color="#111827"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#7c9cff"/></marker>
+    <style>
+      .box{fill:#151d30;stroke:#40537d;stroke-width:2;rx:18}.accent{fill:#17244a;stroke:#6f8fff}.title{font:700 24px system-ui,sans-serif;fill:#f3f6ff}.text{font:16px system-ui,sans-serif;fill:#bdc8df}.small{font:14px system-ui,sans-serif;fill:#93a4c3}.flow{fill:none;stroke:#7c9cff;stroke-width:3;marker-end:url(#arrow)}.trace{fill:none;stroke:#5dcaa5;stroke-width:2;stroke-dasharray:8 7;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1400" height="760" fill="url(#bg)" rx="24"/>
+  <text x="56" y="62" class="title" font-size="30">VentureCore AI — tenant-scoped, tool-calculated business intelligence</text>
+
+  <rect class="box" x="55" y="130" width="230" height="180"/>
+  <text x="85" y="175" class="title">Data sources</text>
+  <text x="85" y="215" class="text">CSV / Excel</text><text x="85" y="250" class="text">Shopify API</text><text x="85" y="285" class="text">Manual entry</text>
+
+  <rect class="box" x="370" y="130" width="250" height="180"/>
+  <text x="400" y="175" class="title">FastAPI layer</text>
+  <text x="400" y="215" class="text">Sessions + demo mode</text><text x="400" y="250" class="text">Validation + sync</text><text x="400" y="285" class="text">Webhook verification</text>
+
+  <rect class="box" x="705" y="130" width="260" height="180"/>
+  <text x="735" y="175" class="title">SQLite store</text>
+  <text x="735" y="215" class="text">organization_id isolation</text><text x="735" y="250" class="text">Minor-unit money</text><text x="735" y="285" class="text">Source identities</text>
+
+  <rect class="box accent" x="1050" y="130" width="290" height="180"/>
+  <text x="1080" y="175" class="title">Typed tool registry</text>
+  <text x="1080" y="215" class="text">SQL + calculations</text><text x="1080" y="250" class="text">Validated arguments</text><text x="1080" y="285" class="text">Source-row workings</text>
+
+  <path class="flow" d="M285 220 H360"/><path class="flow" d="M620 220 H695"/><path class="flow" d="M965 220 H1040"/>
+
+  <rect class="box" x="300" y="420" width="290" height="180"/>
+  <text x="330" y="465" class="title">Agent orchestration</text>
+  <text x="330" y="505" class="text">Gemini function calling</text><text x="330" y="540" class="text">Model explains results</text><text x="330" y="575" class="small">Code—not prompts—calculates</text>
+
+  <rect class="box" x="720" y="420" width="300" height="180"/>
+  <text x="750" y="465" class="title">Scheduled intelligence</text>
+  <text x="750" y="505" class="text">Daily executive briefing</text><text x="750" y="540" class="text">Material threshold alerts</text><text x="750" y="575" class="small">Cached + idempotent delivery</text>
+
+  <rect class="box accent" x="1110" y="420" width="230" height="180"/>
+  <text x="1140" y="465" class="title">Surfaces</text>
+  <text x="1140" y="505" class="text">Web dashboard</text><text x="1140" y="540" class="text">Email briefing</text><text x="1140" y="575" class="text">Show workings</text>
+
+  <path class="flow" d="M1160 310 V360 H445 V410"/><path class="flow" d="M1195 310 V355 H870 V410"/><path class="flow" d="M590 510 H710"/><path class="flow" d="M1020 510 H1100"/>
+
+  <rect class="box" x="55" y="655" width="1285" height="65"/>
+  <text x="85" y="695" class="title" font-size="20">T5 trace store</text>
+  <text x="275" y="695" class="text">run → tool arguments → source rows → latency → provider token accounting → cost → outcome</text>
+  <path class="trace" d="M445 600 V645"/><path class="trace" d="M870 600 V645"/><path class="trace" d="M1225 600 V645"/>
+</svg>
