@@ -69,8 +69,8 @@
   .company-use { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: -4px 0 14px; cursor: pointer; }
   #companyModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
   #companyModalOverlay.visible { display: flex; }
-  #dataModalOverlay, #inventoryModalOverlay, #salesModalOverlay, #financeModalOverlay, #shopifyModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
-  #dataModalOverlay.visible, #inventoryModalOverlay.visible, #salesModalOverlay.visible, #financeModalOverlay.visible, #shopifyModalOverlay.visible { display: flex; }
+  #dataModalOverlay, #inventoryModalOverlay, #salesModalOverlay, #financeModalOverlay, #shopifyModalOverlay, #briefingModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
+  #dataModalOverlay.visible, #inventoryModalOverlay.visible, #salesModalOverlay.visible, #financeModalOverlay.visible, #shopifyModalOverlay.visible, #briefingModalOverlay.visible { display: flex; }
   .company-modal { width: min(680px, 100%); max-height: 88vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
   #inventoryModalOverlay .company-modal { width:min(1080px, 100%); }
   #salesModalOverlay .company-modal { width:min(980px, 100%); }
@@ -607,6 +607,23 @@
   </div>
 </div>
 
+<div id="briefingModalOverlay">
+  <div class="company-modal" style="width:min(620px,100%);">
+    <h2>Daily email briefing</h2>
+    <p>Receive one traceable business summary each day. Material alerts may arrive between briefings.</p>
+    <div class="company-form-grid">
+      <div class="full"><label><input id="briefingEnabled" type="checkbox"> Send email briefings</label></div>
+      <div class="full"><label>Delivery email</label><input id="briefingEmail" type="email"></div>
+      <div><label>Timezone</label><input id="briefingTimezone" value="Asia/Kuala_Lumpur"></div>
+      <div><label>Briefing hour (0–23)</label><input id="briefingHour" type="number" min="0" max="23" value="8"></div>
+      <div><label>Quiet hours start</label><input id="briefingQuietStart" type="time" value="22:00"></div>
+      <div><label>Quiet hours end</label><input id="briefingQuietEnd" type="time" value="07:00"></div>
+    </div>
+    <div id="briefingStatus" class="quality-result"></div>
+    <div class="company-modal-actions"><button class="export-pdf-btn" id="briefingCloseBtn">Close</button><button class="primary" id="briefingSaveBtn">Save preferences</button></div>
+  </div>
+</div>
+
 <div class="app-layout">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-inner">
@@ -622,6 +639,7 @@
       <button class="sales-btn" id="salesOpenBtn">Sales &amp; CRM</button>
       <button class="finance-btn" id="financeOpenBtn">Finance &amp; Cash Flow</button>
       <button class="data-btn" id="shopifyOpenBtn">Shopify Sync</button>
+      <button class="data-btn" id="briefingOpenBtn">Email Briefings</button>
       <button class="data-btn" id="dataCheckOpenBtn">Check Business Data</button>
       <input type="text" class="history-search" id="historySearch" placeholder="Search research...">
       <div class="history-label">
@@ -826,6 +844,17 @@ const shopifyConnectBtn = document.getElementById("shopifyConnectBtn");
 const shopifySyncBtn = document.getElementById("shopifySyncBtn");
 const shopifyDisconnectBtn = document.getElementById("shopifyDisconnectBtn");
 const shopifyCloseBtn = document.getElementById("shopifyCloseBtn");
+const briefingOpenBtn = document.getElementById("briefingOpenBtn");
+const briefingModalOverlay = document.getElementById("briefingModalOverlay");
+const briefingEnabled = document.getElementById("briefingEnabled");
+const briefingEmail = document.getElementById("briefingEmail");
+const briefingTimezone = document.getElementById("briefingTimezone");
+const briefingHour = document.getElementById("briefingHour");
+const briefingQuietStart = document.getElementById("briefingQuietStart");
+const briefingQuietEnd = document.getElementById("briefingQuietEnd");
+const briefingStatus = document.getElementById("briefingStatus");
+const briefingSaveBtn = document.getElementById("briefingSaveBtn");
+const briefingCloseBtn = document.getElementById("briefingCloseBtn");
 const dataCheckOpenBtn = document.getElementById("dataCheckOpenBtn");
 const companyModalOverlay = document.getElementById("companyModalOverlay");
 const companyUseRow = document.getElementById("companyUseRow");
@@ -1626,6 +1655,7 @@ function enterGuestMode() {
   salesOpenBtn.style.display = "none";
   financeOpenBtn.style.display = "none";
   shopifyOpenBtn.style.display = "none";
+  briefingOpenBtn.style.display = "none";
   dataCheckOpenBtn.style.display = "none";
   companyUseRow.style.display = "none";
 }
@@ -1649,6 +1679,7 @@ async function enterDemoMode(openDashboard = false) {
   salesOpenBtn.style.display = "block";
   financeOpenBtn.style.display = "block";
   shopifyOpenBtn.style.display = "none";
+  briefingOpenBtn.style.display = "none";
   dataCheckOpenBtn.style.display = "block";
   companyUseRow.style.display = "none";
   setDemoReadOnly(true);
@@ -1695,6 +1726,7 @@ async function afterLogin(email) {
   salesOpenBtn.style.display = "block";
   financeOpenBtn.style.display = "block";
   shopifyOpenBtn.style.display = "block";
+  briefingOpenBtn.style.display = "block";
   dataCheckOpenBtn.style.display = "block";
   const profileRes = await fetch("/company/profile");
   const profile = profileRes.ok ? await profileRes.json() : null;
@@ -1748,6 +1780,41 @@ shopifyDisconnectBtn.addEventListener("click", async () => {
   if (!confirm("Disconnect Shopify? Existing synced records will remain available.")) return;
   await fetch("/integrations/shopify", { method: "DELETE" });
   await loadShopifyStatus();
+});
+
+briefingOpenBtn.addEventListener("click", async () => {
+  briefingStatus.style.display = "none";
+  const response = await fetch("/briefings/preferences");
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) { alert(data.detail || "Briefing preferences are unavailable."); return; }
+  briefingEnabled.checked = data.enabled;
+  briefingEmail.value = data.email || "";
+  briefingTimezone.value = data.timezone;
+  briefingHour.value = data.briefing_hour;
+  briefingQuietStart.value = data.quiet_start;
+  briefingQuietEnd.value = data.quiet_end;
+  briefingModalOverlay.classList.add("visible");
+});
+briefingCloseBtn.addEventListener("click", () => briefingModalOverlay.classList.remove("visible"));
+briefingModalOverlay.addEventListener("click", event => { if (event.target === briefingModalOverlay) briefingModalOverlay.classList.remove("visible"); });
+briefingSaveBtn.addEventListener("click", async () => {
+  briefingSaveBtn.disabled = true;
+  const response = await fetch("/briefings/preferences", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      enabled: briefingEnabled.checked,
+      email: briefingEmail.value.trim(),
+      timezone: briefingTimezone.value.trim(),
+      briefing_hour: Number(briefingHour.value),
+      quiet_start: briefingQuietStart.value,
+      quiet_end: briefingQuietEnd.value,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  briefingSaveBtn.disabled = false;
+  briefingStatus.style.display = "block";
+  briefingStatus.textContent = response.ok ? "Email briefing preferences saved." : (data.detail || "Preferences could not be saved.");
 });
 
 async function checkAuth() {

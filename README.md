@@ -44,6 +44,27 @@ resumable backfill. Verified webhooks keep data current, and a periodic `updated
 reconciliation pass repairs missed events. Sync errors leave the last successfully synced data
 available and are shown in plain language in the connection panel.
 
+## Scheduled briefings and alerts
+
+Scheduled work is persisted in SQLite and triggered hourly by
+`.github/workflows/scheduled-workers.yml`, so a Render process restart cannot lose job state and
+no paid queue is required. In GitHub repository settings, create these Actions secrets:
+
+- `VENTURECORE_WORKER_URL`: the Render application URL, such as `https://venturecore-ai.onrender.com`
+- `VENTURECORE_WORKER_SECRET`: the same long random value configured as `JOB_RUNNER_SECRET` on Render
+
+Configure the SMTP and alert settings documented in `.env.example`, then use **Email Briefings**
+in the signed-in sidebar to enable delivery, select the organisation timezone, and set quiet
+hours. Every delivery includes a signed unsubscribe link. Briefings are cached per organisation
+and local date, and both jobs and deliveries use persistent idempotency keys. Transient failures
+retry with exponential backoff up to `JOB_MAX_ATTEMPTS`; each attempt is linked to the agent trace
+store. Alerts are sent only when a configured material condition changes from inactive to active.
+
+Daily briefings and threshold alerts make **zero model-provider calls**. Every cash, receivable,
+stock-cover, and expense-baseline figure is produced by the deterministic typed
+`get_daily_briefing_metrics` tool, with its source row identifiers retained in the cached payload.
+Therefore the model-call bound is exactly **0 per organisation per day** for this worker.
+
 ## Public demo
 
 Startup automatically creates or refreshes the fictional, read-only Harbour & Pine demo

@@ -5,6 +5,7 @@ import math
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 from google.genai import types
@@ -110,6 +111,30 @@ class FinanceSnapshotOutput(BaseModel):
     outstanding_receivables: list[dict[str, Any]]
     inventory_commitments: dict[str, Any]
     recent_transactions: list[dict[str, Any]]
+
+
+class DailyBriefingMetricsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    as_of: date
+    velocity_days: int = Field(ge=1, le=365)
+    stockout_days: int = Field(ge=1, le=365)
+    expense_period_days: int = Field(ge=1, le=365)
+    baseline_periods: int = Field(ge=1, le=12)
+    receivable_min_minor: int = Field(ge=0)
+    expense_increase_percent: int = Field(ge=0)
+    expense_increase_min_minor: int = Field(ge=0)
+    cash_drop_percent: int = Field(ge=0)
+    cash_drop_min_minor: int = Field(ge=0)
+
+
+class DailyBriefingMetricsOutput(BaseModel):
+    as_of: date
+    currency: str
+    cash: dict[str, Any]
+    overdue_receivables: list[dict[str, Any]]
+    stockout_products: list[dict[str, Any]]
+    expense_anomalies: list[dict[str, Any]]
 
 
 class RecordSaleOutput(BaseModel):
@@ -648,6 +673,190 @@ def _finance_snapshot(context: ToolContext, body: SnapshotInput) -> FinanceSnaps
         connection.close()
 
 
+def _rounded_percent(numerator: int, denominator: int) -> Optional[int]:
+    if denominator == 0:
+        return None
+    value = Decimal(numerator) * Decimal(100) / Decimal(abs(denominator))
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _daily_briefing_metrics(
+    context: ToolContext,
+    body: DailyBriefingMetricsInput,
+) -> DailyBriefingMetricsOutput:
+    connection = get_connection()
+    as_of = body.as_of
+    current_start = as_of - timedelta(days=body.expense_period_days - 1)
+    previous_end = current_start - timedelta(days=1)
+    previous_start = previous_end - timedelta(days=body.expense_period_days - 1)
+    baseline_start = current_start - timedelta(
+        days=body.expense_period_days * body.baseline_periods
+    )
+    try:
+        transactions = connection.execute(
+            """SELECT id, transaction_type, amount_minor, currency, category,
+                      transaction_date
+                 FROM finance_transactions
+                WHERE user_id = ? AND organization_id = ? AND transaction_date <= ?
+                ORDER BY transaction_date, id""",
+            (context.user_id, context.organization_id, as_of.isoformat()),
+        ).fetchall()
+        currency = next((row["currency"] for row in transactions), "MYR")
+
+        def net_between(start: date, end: date) -> tuple[int, list[int]]:
+            rows = [
+                row
+                for row in transactions
+                if start.isoformat() <= row["transaction_date"] <= end.isoformat()
+            ]
+            net = sum(
+                int(row["amount_minor"])
+                if row["transaction_type"] == "income"
+                else -int(row["amount_minor"])
+                for row in rows
+            )
+            return net, [int(row["id"]) for row in rows]
+
+        current_net, current_ids = net_between(current_start, as_of)
+        previous_net, previous_ids = net_between(previous_start, previous_end)
+        change = current_net - previous_net
+        cash_balance = sum(
+            int(row["amount_minor"])
+            if row["transaction_type"] == "income"
+            else -int(row["amount_minor"])
+            for row in transactions
+        )
+        change_percent = _rounded_percent(change, previous_net)
+        cash = {
+            "recorded_cash_balance_minor": cash_balance,
+            "current_net_cash_flow_minor": current_net,
+            "previous_net_cash_flow_minor": previous_net,
+            "change_minor": change,
+            "change_percent": change_percent,
+            "material_drop": (
+                change < 0
+                and abs(change) >= body.cash_drop_min_minor
+                and change_percent is not None
+                and change_percent <= -body.cash_drop_percent
+            ),
+            "currency": currency,
+            "source_row_ids": {
+                "finance_transactions": [int(row["id"]) for row in transactions]
+            },
+            "period_source_row_ids": {
+                "current": current_ids,
+                "previous": previous_ids,
+            },
+        }
+
+        receivable_rows = connection.execute(
+            """SELECT s.id, s.customer_id, s.total_amount_minor, s.currency,
+                      s.due_date, c.name AS customer_name
+                 FROM sales_orders s
+                 LEFT JOIN customers c
+                   ON c.id = s.customer_id AND c.organization_id = s.organization_id
+                WHERE s.user_id = ? AND s.organization_id = ?
+                  AND s.payment_status != 'paid' AND s.due_date < ?
+                ORDER BY s.due_date, s.id""",
+            (context.user_id, context.organization_id, as_of.isoformat()),
+        ).fetchall()
+        overdue_receivables = [
+            {
+                "id": int(row["id"]),
+                "customer_id": int(row["customer_id"]) if row["customer_id"] else None,
+                "customer_name": row["customer_name"] or "Unknown customer",
+                "amount_minor": int(row["total_amount_minor"]),
+                "currency": row["currency"],
+                "due_date": row["due_date"],
+                "material": int(row["total_amount_minor"]) >= body.receivable_min_minor,
+                "source_row_ids": {
+                    "sales_orders": [int(row["id"])],
+                    "customers": [int(row["customer_id"])] if row["customer_id"] else [],
+                },
+            }
+            for row in receivable_rows
+        ]
+
+        inventory = _inventory_snapshot(
+            context,
+            SnapshotInput(lookback_days=body.velocity_days, as_of=as_of),
+        )
+        stockout_products = [
+            {
+                "product_id": item.id,
+                "name": item.name,
+                "current_stock": item.current_stock,
+                "days_of_cover": item.days_of_stock,
+                "currency": item.currency,
+                "source_row_ids": item.source_row_ids,
+            }
+            for item in inventory.items
+            if item.current_stock <= 0
+            or (item.days_of_stock is not None and item.days_of_stock <= body.stockout_days)
+        ]
+
+        expense_rows = [
+            row for row in transactions if row["transaction_type"] == "expense"
+        ]
+        categories = sorted({row["category"] or "Other" for row in expense_rows})
+        anomalies = []
+        for category in categories:
+            current_rows = [
+                row
+                for row in expense_rows
+                if (row["category"] or "Other") == category
+                and current_start.isoformat() <= row["transaction_date"] <= as_of.isoformat()
+            ]
+            baseline_rows = [
+                row
+                for row in expense_rows
+                if (row["category"] or "Other") == category
+                and baseline_start.isoformat() <= row["transaction_date"] < current_start.isoformat()
+            ]
+            current_amount = sum(int(row["amount_minor"]) for row in current_rows)
+            baseline_total = sum(int(row["amount_minor"]) for row in baseline_rows)
+            baseline_average = int(
+                (Decimal(baseline_total) / Decimal(body.baseline_periods)).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP
+                )
+            )
+            increase = current_amount - baseline_average
+            increase_percent = _rounded_percent(increase, baseline_average)
+            if (
+                increase > 0
+                and increase >= body.expense_increase_min_minor
+                and increase_percent is not None
+                and increase_percent >= body.expense_increase_percent
+            ):
+                anomalies.append(
+                    {
+                        "category": category,
+                        "current_amount_minor": current_amount,
+                        "baseline_average_minor": baseline_average,
+                        "increase_minor": increase,
+                        "increase_percent": increase_percent,
+                        "currency": currency,
+                        "source_row_ids": {
+                            "finance_transactions": [int(row["id"]) for row in current_rows]
+                        },
+                        "baseline_source_row_ids": {
+                            "finance_transactions": [int(row["id"]) for row in baseline_rows]
+                        },
+                    }
+                )
+
+        return DailyBriefingMetricsOutput(
+            as_of=as_of,
+            currency=currency,
+            cash=cash,
+            overdue_receivables=overdue_receivables,
+            stockout_products=stockout_products,
+            expense_anomalies=anomalies,
+        )
+    finally:
+        connection.close()
+
+
 def _record_sale(context: ToolContext, body: RecordSaleInput) -> RecordSaleOutput:
     connection = get_connection()
     try:
@@ -859,6 +1068,13 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             input_model=SnapshotInput,
             output_model=FinanceSnapshotOutput,
             handler=_finance_snapshot,
+        ),
+        ToolDefinition(
+            name="get_daily_briefing_metrics",
+            description="Compute the caller's deterministic cash trend, overdue receivables, stockout risks, and expense anomalies with source row identifiers.",
+            input_model=DailyBriefingMetricsInput,
+            output_model=DailyBriefingMetricsOutput,
+            handler=_daily_briefing_metrics,
         ),
         ToolDefinition(
             name="record_sale",

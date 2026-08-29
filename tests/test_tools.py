@@ -95,6 +95,7 @@ class BusinessToolTests(unittest.TestCase):
                 "get_inventory_snapshot",
                 "get_sales_snapshot",
                 "get_finance_snapshot",
+                "get_daily_briefing_metrics",
                 "record_sale",
                 "format_opportunities",
             },
@@ -151,6 +152,18 @@ class BusinessToolTests(unittest.TestCase):
             "get_inventory_snapshot": {},
             "get_sales_snapshot": {},
             "get_finance_snapshot": {},
+            "get_daily_briefing_metrics": {
+                "as_of": "2026-08-29",
+                "velocity_days": 30,
+                "stockout_days": 14,
+                "expense_period_days": 30,
+                "baseline_periods": 3,
+                "receivable_min_minor": 50000,
+                "expense_increase_percent": 50,
+                "expense_increase_min_minor": 10000,
+                "cash_drop_percent": 20,
+                "cash_drop_min_minor": 50000,
+            },
             "record_sale": {"product_id": 100, "quantity": 1},
             "format_opportunities": {
                 "candidates": [

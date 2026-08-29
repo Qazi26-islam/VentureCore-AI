@@ -1,6 +1,4 @@
 import logging
-import os
-import secrets
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +8,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from backend.api.research import router as research_router
 from backend.api.auth import router as auth_router
 from backend.api.shopify import router as shopify_router
+from backend.api.workers import router as workers_router
+from backend.config import SESSION_SECRET
 from backend.db import init_db
 from backend.seed_demo import seed_demo
 from backend.shopify import start_reconciliation_worker
@@ -21,12 +21,12 @@ logging.basicConfig(
 
 app = FastAPI(title="VentureCore AI")
 
-SESSION_SECRET = os.getenv("SESSION_SECRET", secrets.token_hex(32))
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 
 app.include_router(research_router)
 app.include_router(auth_router)
 app.include_router(shopify_router)
+app.include_router(workers_router)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")

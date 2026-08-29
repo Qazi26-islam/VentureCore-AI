@@ -19,6 +19,7 @@ logger = logging.getLogger("database_migrations")
 MIGRATION_VERSION = 1
 OBSERVABILITY_MIGRATION_VERSION = 2
 SHOPIFY_MIGRATION_VERSION = 3
+SCHEDULED_WORKERS_MIGRATION_VERSION = 4
 DOMAIN_TABLES = (
     "research_jobs",
     "follow_up_messages",
@@ -511,6 +512,100 @@ def _downgrade_shopify(conn: sqlite3.Connection) -> None:
     )
 
 
+def _upgrade_scheduled_workers(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE IF NOT EXISTS delivery_preferences (
+        organization_id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        email TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0, 1)),
+        quiet_start TEXT NOT NULL DEFAULT '22:00',
+        quiet_end TEXT NOT NULL DEFAULT '07:00',
+        timezone TEXT NOT NULL DEFAULT 'Asia/Kuala_Lumpur',
+        briefing_hour INTEGER NOT NULL DEFAULT 8 CHECK(briefing_hour BETWEEN 0 AND 23),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (organization_id) REFERENCES organizations(id),
+        FOREIGN KEY (user_id) REFERENCES users(id))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS briefing_cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        organization_id INTEGER NOT NULL,
+        period TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        html_body TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'computed',
+        external_id TEXT NOT NULL,
+        last_synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, period),
+        UNIQUE(organization_id, source, external_id),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS scheduled_job_runs (
+        id TEXT PRIMARY KEY,
+        organization_id INTEGER NOT NULL,
+        job_type TEXT NOT NULL,
+        period TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running'
+            CHECK(status IN ('running', 'retry', 'success', 'failed', 'timed_out')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        timeout_seconds INTEGER NOT NULL,
+        next_retry_at TEXT,
+        trace_run_id TEXT,
+        outcome_json TEXT,
+        failure_mode TEXT,
+        started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finished_at TEXT,
+        UNIQUE(organization_id, job_type, period),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id),
+        FOREIGN KEY (trace_run_id) REFERENCES agent_runs(id) ON DELETE SET NULL)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS notification_deliveries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        organization_id INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('briefing', 'alert')),
+        idempotency_key TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('sending', 'sent', 'failed')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        sent_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, kind, idempotency_key),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS alert_states (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        organization_id INTEGER NOT NULL,
+        alert_key TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 0 CHECK(active IN (0, 1)),
+        value_json TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'computed',
+        external_id TEXT NOT NULL,
+        last_synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_alerted_at TEXT,
+        UNIQUE(organization_id, alert_key),
+        UNIQUE(organization_id, source, external_id),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id))""")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_scheduled_jobs_retry "
+        "ON scheduled_job_runs(status, next_retry_at)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)",
+        (SCHEDULED_WORKERS_MIGRATION_VERSION,),
+    )
+
+
+def _downgrade_scheduled_workers(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE IF EXISTS alert_states")
+    conn.execute("DROP TABLE IF EXISTS notification_deliveries")
+    conn.execute("DROP TABLE IF EXISTS scheduled_job_runs")
+    conn.execute("DROP TABLE IF EXISTS briefing_cache")
+    conn.execute("DROP TABLE IF EXISTS delivery_preferences")
+    conn.execute(
+        "DELETE FROM schema_migrations WHERE version = ?",
+        (SCHEDULED_WORKERS_MIGRATION_VERSION,),
+    )
+
+
 def upgrade(conn: sqlite3.Connection) -> None:
     conn.row_factory = sqlite3.Row
     conn.execute(USERS_SCHEMA)
@@ -522,6 +617,7 @@ def upgrade(conn: sqlite3.Connection) -> None:
         _create_sync_indexes(conn)
         _upgrade_observability(conn)
         _upgrade_shopify(conn)
+        _upgrade_scheduled_workers(conn)
         conn.commit()
         return
 
@@ -548,6 +644,7 @@ def upgrade(conn: sqlite3.Connection) -> None:
         conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (MIGRATION_VERSION,))
         _upgrade_observability(conn)
         _upgrade_shopify(conn)
+        _upgrade_scheduled_workers(conn)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -567,6 +664,7 @@ def downgrade(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
         conn.execute("BEGIN IMMEDIATE")
+        _downgrade_scheduled_workers(conn)
         _downgrade_shopify(conn)
         _downgrade_observability(conn)
         _replace_tables(conn, LEGACY_SCHEMAS, rows_by_table, _downgrade_row)
