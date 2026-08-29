@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend import config
 from backend.db import DEFAULT_ORGANIZATION_ID, get_connection
+from backend.demo_briefing import stored_demo_briefing
 from backend.workers import organization_from_unsubscribe_token, run_due_jobs
 
 
@@ -34,6 +35,16 @@ def _identity(request: Request) -> tuple[int, int]:
     if user_id is None:
         raise HTTPException(status_code=401, detail="Sign in to manage briefing delivery.")
     return int(user_id), DEFAULT_ORGANIZATION_ID
+
+
+@router.get("/briefings/demo")
+def get_demo_briefing(request: Request):
+    if not request.session.get("demo_mode"):
+        raise HTTPException(status_code=404, detail="The sample briefing is available in demo mode.")
+    briefing = stored_demo_briefing()
+    if briefing is None:
+        raise HTTPException(status_code=503, detail="The sample briefing has not been prepared yet.")
+    return briefing
 
 
 @router.get("/briefings/preferences")

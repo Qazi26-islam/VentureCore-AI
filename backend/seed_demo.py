@@ -48,6 +48,10 @@ def _clear_demo_data(conn: sqlite3.Connection) -> None:
         "company_profiles",
     ):
         conn.execute(f"DELETE FROM {table} WHERE organization_id = ?", (DEMO_ORGANIZATION_ID,))
+    conn.execute(
+        "DELETE FROM briefing_cache WHERE organization_id = ?",
+        (DEMO_ORGANIZATION_ID,),
+    )
 
 
 def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None) -> dict:
@@ -235,7 +239,7 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                 quantity = max(1, (base_sales * seasonality[month_index] + 50) // 100)
                 receipt_quantity = quantity
                 if product_index == 4 and month_index >= 9:
-                    receipt_quantity = max(0, quantity - 12)
+                    receipt_quantity = max(0, quantity - 16)
                 received_quantities[product_id] += receipt_quantity
                 sold_quantities[product_id] += quantity
                 if receipt_quantity:

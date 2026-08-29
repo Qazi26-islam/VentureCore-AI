@@ -2,7 +2,10 @@ import os
 import tempfile
 import unittest
 from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+from contextlib import ExitStack
+from unittest.mock import patch
 
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 os.environ.setdefault("SESSION_SECRET", "test-session-secret")
@@ -83,7 +86,7 @@ class PublicDemoTests(unittest.TestCase):
             self.assertEqual(product["stock"], repeated_result["stock_balances"][product["id"]])
 
         cold_brew = next(product for product in products if product["name"] == "Cold Brew Bottle")
-        self.assertEqual(cold_brew["stock"], 24)
+        self.assertEqual(cold_brew["stock"], 12)
         self.assertLess(cold_brew["stock"], cold_brew["reorder_point"])
 
         overdue = conn.execute(
@@ -122,12 +125,14 @@ class PublicDemoTests(unittest.TestCase):
     def test_visitor_can_enter_populated_demo_and_real_accounts_cannot_see_it(self):
         root = self.client.get("/")
         self.assertEqual(root.status_code, 200)
-        self.assertIn("View demo workspace", root.text)
-
-        started = self.client.post("/demo/start")
-        self.assertEqual(started.status_code, 200, started.text)
-        self.assertEqual(started.json()["organization_id"], database.DEMO_ORGANIZATION_ID)
         self.assertTrue(self.client.get("/auth/me").json()["demo_mode"])
+        briefing = self.client.get("/briefings/demo")
+        self.assertEqual(briefing.status_code, 200, briefing.text)
+        metrics = briefing.json()["content"]["metrics"]
+        self.assertTrue(metrics["stockout_products"])
+        self.assertTrue(metrics["overdue_receivables"])
+        self.assertTrue(metrics["expense_anomalies"])
+        self.assertTrue(briefing.json()["content"]["actions"])
 
         inventory = self.client.get("/inventory/dashboard")
         sales = self.client.get("/sales/dashboard")
@@ -144,10 +149,93 @@ class PublicDemoTests(unittest.TestCase):
             json={"email": "real-owner@example.com", "password": "strong-password"},
         )
         self.assertEqual(signup.status_code, 200, signup.text)
+        self.assertEqual(self.client.get("/").status_code, 200)
+        identity = self.client.get("/auth/me").json()
+        self.assertTrue(identity["logged_in"])
+        self.assertFalse(identity.get("demo_mode", False))
         self.assertEqual(self.client.get("/inventory/dashboard").json()["items"], [])
         self.assertEqual(self.client.get("/sales/customers").json(), [])
         self.assertEqual(self.client.get("/research/history").json(), [])
         self.assertEqual(self._demo_counts()["products"], 5)
+
+    def test_demo_page_load_never_invokes_a_model_client(self):
+        client_paths = (
+            "backend.agents.competitor.client.models.generate_content",
+            "backend.agents.finance_operations.client.models.generate_content",
+            "backend.agents.financial.client.models.generate_content",
+            "backend.agents.followup.client.models.generate_content",
+            "backend.agents.inventory.client.models.generate_content",
+            "backend.agents.market_research.client.models.generate_content",
+            "backend.agents.opportunity_finder.client.models.generate_content",
+            "backend.agents.sales.client.models.generate_content",
+            "backend.agents.scope_check.client.models.generate_content",
+            "backend.agents.synthesis.client.models.generate_content",
+        )
+        with ExitStack() as stack:
+            mocks = [
+                stack.enter_context(patch(path, side_effect=AssertionError("model called during demo page load")))
+                for path in client_paths
+            ]
+            self.assertEqual(self.client.get("/").status_code, 200)
+            self.assertTrue(self.client.get("/auth/me").json()["demo_mode"])
+            self.assertEqual(self.client.get("/briefings/demo").status_code, 200)
+            self.assertTrue(all(mock.call_count == 0 for mock in mocks))
+
+    def test_demo_briefing_figures_reconcile_to_seeded_source_rows(self):
+        self.client.get("/")
+        payload = self.client.get("/briefings/demo").json()["content"]
+        metrics = payload["metrics"]
+        conn = database.get_connection()
+
+        for receivable in metrics["overdue_receivables"]:
+            row = conn.execute(
+                "SELECT total_amount_minor, organization_id FROM sales_orders WHERE id = ?",
+                (receivable["id"],),
+            ).fetchone()
+            self.assertEqual(row["organization_id"], database.DEMO_ORGANIZATION_ID)
+            self.assertEqual(row["total_amount_minor"], receivable["amount_minor"])
+
+        for product in metrics["stockout_products"]:
+            stock = conn.execute(
+                """SELECT COALESCE(SUM(quantity_change), 0) FROM inventory_transactions
+                    WHERE organization_id = ? AND product_id = ?""",
+                (database.DEMO_ORGANIZATION_ID, product["product_id"]),
+            ).fetchone()[0]
+            sold = conn.execute(
+                """SELECT COALESCE(SUM(quantity), 0) FROM sales_orders
+                    WHERE organization_id = ? AND product_id = ?
+                      AND date(created_at) >= date(?, '-29 days') AND date(created_at) <= date(?)""",
+                (database.DEMO_ORGANIZATION_ID, product["product_id"], metrics["as_of"], metrics["as_of"]),
+            ).fetchone()[0]
+            self.assertEqual(stock, product["current_stock"])
+            expected_cover = round(float(stock) / (float(sold) / 30), 1)
+            self.assertEqual(expected_cover, product["days_of_cover"])
+
+        for anomaly in metrics["expense_anomalies"]:
+            current_ids = anomaly["source_row_ids"]["finance_transactions"]
+            baseline_ids = anomaly["baseline_source_row_ids"]["finance_transactions"]
+            current = sum(
+                conn.execute(
+                    "SELECT amount_minor FROM finance_transactions WHERE id = ? AND organization_id = ?",
+                    (row_id, database.DEMO_ORGANIZATION_ID),
+                ).fetchone()[0]
+                for row_id in current_ids
+            )
+            baseline_total = sum(
+                conn.execute(
+                    "SELECT amount_minor FROM finance_transactions WHERE id = ? AND organization_id = ?",
+                    (row_id, database.DEMO_ORGANIZATION_ID),
+                ).fetchone()[0]
+                for row_id in baseline_ids
+            )
+            expected_baseline = int(
+                (Decimal(baseline_total) / Decimal(3)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            )
+            self.assertEqual(current, anomaly["current_amount_minor"])
+            self.assertEqual(expected_baseline, anomaly["baseline_average_minor"])
+        conn.close()
+
+        self.assertTrue(payload["actions"])
 
     def test_every_business_write_path_rejects_demo_session(self):
         self.assertEqual(self.client.post("/demo/start").status_code, 200)

@@ -30,9 +30,9 @@ The implementation is a FastAPI application with a static HTML/CSS/JavaScript cl
 
 ## Product surface
 
-The primary navigation contains **Inventory**, **Finance & Cash Flow**, and **Executive Briefing**. Research, company profile, Sales & CRM, Shopify sync, and file-quality checking remain available under **More**; they are demoted, not removed.
+The primary navigation contains **Inventory**, **Finance & Cash Flow**, **Executive Briefing**, and the secondary **Business Research Agents** workflow. Company profile, Sales & CRM, Shopify sync, and file-quality checking remain available under **More**; they are demoted, not removed.
 
-The root URL exposes a one-click, read-only fictional demo. Signed-in users can write operational data, connect Shopify, ask the existing agents questions, configure briefing delivery and quiet hours, and use the secondary research workflow.
+The root URL opens a read-only fictional Executive Briefing immediately for an unauthenticated visitor. Signed-in users retain their existing workspace landing behavior and can write operational data, connect Shopify, ask the existing agents questions, configure briefing delivery and quiet hours, and use the secondary research workflow.
 
 ## Correctness and eval harness
 
@@ -70,7 +70,7 @@ cp .env.example .env
 python -m uvicorn backend.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000` and choose **View demo workspace**. Startup applies migrations and idempotently seeds the fictional demo, so no manual database command is required. The placeholder `GEMINI_API_KEY` from `.env.example` is enough to run the deterministic demo; replace it with a real key only to call Gemini-backed agent and research endpoints. Before any shared deployment, replace `SESSION_SECRET` with a long random value.
+Open `http://127.0.0.1:8000`. An unauthenticated browser lands directly on the stored fictional Executive Briefing. Startup applies migrations, idempotently seeds the demo, and prepares its cached briefing, so page loads never call Gemini. Regenerate that stored output deliberately with `python -m backend.demo_briefing`. The placeholder `GEMINI_API_KEY` from `.env.example` is enough to run the deterministic demo; replace it with a real key only to call Gemini-backed agent and research endpoints. Before any shared deployment, replace `SESSION_SECRET` with a long random value.
 
 ### Optional integrations and delivery
 

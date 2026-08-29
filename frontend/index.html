@@ -92,6 +92,14 @@
   .quality-result { display:none; margin-top:16px; padding:12px; border-radius:10px; background:var(--panel2); font-size:12.5px; line-height:1.55; }
   .quality-result ul { padding-left:18px; margin:8px 0 0; }
   .inventory-section { margin-top:16px; padding:16px; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,.01); }
+  .write-form-section { margin-top:16px; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,.01); }
+  .write-form-section > summary { cursor:pointer; padding:14px 16px; color:var(--text); font-size:13px; font-weight:700; }
+  .write-form-body { padding:0 16px 16px; }
+  .briefing-output { display:none; }
+  .briefing-block { margin-top:12px; padding:14px; border:1px solid var(--border); border-radius:11px; background:var(--panel2); }
+  .briefing-block h3 { margin:0 0 8px; font-size:14px; }
+  .briefing-block ul, .briefing-block ol { margin:7px 0 0; padding-left:20px; }
+  .briefing-block li { margin:7px 0; font-size:12.5px; line-height:1.5; }
   .inventory-section h3 { margin:0 0 4px; font-size:14px; }
   .inventory-section-note { color:var(--muted); font-size:11.5px; margin-bottom:12px; }
   .supplier-list { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
@@ -163,7 +171,9 @@
   .demo-banner a { color:#ffffff; font-weight:700; text-decoration:underline; cursor:pointer; }
   body.demo-mode .sidebar { padding-top:52px; }
   body.demo-mode .sidebar-toggle { top:50px; }
-  body.demo-mode #companyModalOverlay, body.demo-mode #dataModalOverlay, body.demo-mode #inventoryModalOverlay, body.demo-mode #salesModalOverlay, body.demo-mode #financeModalOverlay { padding-top:52px; }
+  body.demo-mode #companyModalOverlay, body.demo-mode #dataModalOverlay, body.demo-mode #inventoryModalOverlay, body.demo-mode #salesModalOverlay, body.demo-mode #financeModalOverlay, body.demo-mode #briefingModalOverlay { padding-top:52px; left:240px; }
+  body.demo-mode.sidebar-collapsed #companyModalOverlay, body.demo-mode.sidebar-collapsed #dataModalOverlay, body.demo-mode.sidebar-collapsed #inventoryModalOverlay, body.demo-mode.sidebar-collapsed #salesModalOverlay, body.demo-mode.sidebar-collapsed #financeModalOverlay, body.demo-mode.sidebar-collapsed #briefingModalOverlay { left:0; }
+  body.demo-mode .write-form-section, body.demo-mode #briefingPreferencesPanel { display:none !important; }
   .sidebar-toggle { position: fixed; top: 20px; left: 196px; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 50; transition: left 0.2s, color 0.2s, border-color 0.2s; }
   .sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
   .sidebar-toggle svg { width: 16px; height: 16px; stroke: currentColor; }
@@ -336,6 +346,7 @@
   .hint { text-align: center; color: var(--muted); font-size: 13px; margin-top: 4px; margin-bottom: 20px; }
   .footer { text-align: center; color: var(--muted); font-size: 12px; font-weight: 600; padding-top: 24px; margin-top: auto; }
   @media (max-width: 760px) {
+    body.demo-mode #companyModalOverlay, body.demo-mode #dataModalOverlay, body.demo-mode #inventoryModalOverlay, body.demo-mode #salesModalOverlay, body.demo-mode #financeModalOverlay, body.demo-mode #briefingModalOverlay { left:0; }
     .charts-grid { grid-template-columns: 1fr; }
     .chart-card.wide { grid-column: auto; }
     .source-row { grid-template-columns: 24px minmax(0, 1fr); }
@@ -395,7 +406,7 @@
 
 <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
-<button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+<button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar" aria-label="Toggle navigation">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <rect x="3" y="3" width="18" height="18" rx="2"/>
     <line x1="9" y1="3" x2="9" y2="21"/>
@@ -463,9 +474,15 @@
   <div class="company-modal">
     <h2>Inventory Intelligence</h2>
     <p>Track stock, sales velocity, supplier lead times, and automatic reorder recommendations.</p>
+    <div class="inventory-summary" id="inventorySummary"></div>
+    <div style="overflow:auto;"><table class="inventory-table"><thead><tr><th>Product</th><th>Stock</th><th>Sales/day</th><th>Days left</th><th>Recommended reorder</th><th>Status</th><th>Actions</th></tr></thead><tbody id="inventoryTableBody"></tbody></table></div>
     <div class="inventory-section">
       <h3>Suppliers</h3>
-      <div class="inventory-section-note">Add suppliers once, then connect them to products and lead-time calculations.</div>
+      <div class="supplier-list" id="supplierList"><span class="supplier-chip">No suppliers yet</span></div>
+    </div>
+    <details class="write-form-section">
+      <summary>Add supplier</summary>
+      <div class="write-form-body">
       <div class="company-form-grid">
         <div><label>Supplier name *</label><input id="supplierName" placeholder="ABC Wholesale"></div>
         <div><label>Email</label><input id="supplierEmail" type="email" placeholder="orders@supplier.com"></div>
@@ -473,24 +490,25 @@
         <div><label>Payment terms</label><input id="supplierTerms" placeholder="Net 30"></div>
       </div>
       <div class="company-modal-actions"><button class="export-pdf-btn" id="supplierAddBtn">Add Supplier</button></div>
-      <div class="supplier-list" id="supplierList"><span class="supplier-chip">No suppliers yet</span></div>
-    </div>
-    <div class="inventory-section">
-      <h3>Add a product</h3>
-      <div class="inventory-section-note">The reorder engine combines your threshold, supplier lead time, and recorded sales.</div>
-    <div class="company-form-grid">
-      <div><label>Product name *</label><input id="productName" placeholder="Coca-Cola 500ml"></div>
-      <div><label>SKU</label><input id="productSku" placeholder="CC-500"></div>
-      <div><label>Category</label><input id="productCategory" placeholder="Beverages"></div>
-      <div><label>Supplier</label><select id="productSupplier"><option value="">No supplier</option></select></div>
-      <div><label>Unit cost</label><input id="productCost" type="number" min="0" step="0.01" placeholder="2.50"></div>
-      <div><label>Selling price</label><input id="productPrice" type="number" min="0" step="0.01" placeholder="4.50"></div>
-      <div><label>Reorder point</label><input id="productReorder" type="number" min="0" step="1" placeholder="100"></div>
-      <div><label>Supplier lead time (days)</label><input id="productLeadTime" type="number" min="0" value="7"></div>
-    </div>
-    <div class="company-modal-actions"><button class="primary" id="productAddBtn" style="padding:10px 15px;">Add Product</button></div>
-    </div>
-    <div class="inventory-summary" id="inventorySummary"></div>
+      </div>
+    </details>
+    <details class="write-form-section">
+      <summary>Add product</summary>
+      <div class="write-form-body">
+        <div class="inventory-section-note">The reorder engine combines your threshold, supplier lead time, and recorded sales.</div>
+        <div class="company-form-grid">
+          <div><label>Product name *</label><input id="productName" placeholder="Coca-Cola 500ml"></div>
+          <div><label>SKU</label><input id="productSku" placeholder="CC-500"></div>
+          <div><label>Category</label><input id="productCategory" placeholder="Beverages"></div>
+          <div><label>Supplier</label><select id="productSupplier"><option value="">No supplier</option></select></div>
+          <div><label>Unit cost</label><input id="productCost" type="number" min="0" step="0.01" placeholder="2.50"></div>
+          <div><label>Selling price</label><input id="productPrice" type="number" min="0" step="0.01" placeholder="4.50"></div>
+          <div><label>Reorder point</label><input id="productReorder" type="number" min="0" step="1" placeholder="100"></div>
+          <div><label>Supplier lead time (days)</label><input id="productLeadTime" type="number" min="0" value="7"></div>
+        </div>
+        <div class="company-modal-actions"><button class="primary" id="productAddBtn" style="padding:10px 15px;">Add Product</button></div>
+      </div>
+    </details>
     <div class="inventory-ai">
       <h3>Ask the Inventory Agent</h3>
       <p>It answers using your recorded products, stock movements, suppliers, costs, and reorder calculations.</p>
@@ -505,7 +523,6 @@
       </div>
       <div class="inventory-ai-answer" id="inventoryAiAnswer"></div>
     </div>
-    <div style="overflow:auto;"><table class="inventory-table"><thead><tr><th>Product</th><th>Stock</th><th>Sales/day</th><th>Days left</th><th>Recommended reorder</th><th>Status</th><th>Actions</th></tr></thead><tbody id="inventoryTableBody"></tbody></table></div>
     <div class="company-modal-actions"><button class="export-pdf-btn" id="inventoryCloseBtn">Close</button></div>
   </div>
 </div>
@@ -514,8 +531,15 @@
   <div class="company-modal">
     <h2>Sales &amp; CRM</h2>
     <p>Manage customers, record sales, track unpaid revenue, and keep Inventory synchronized automatically.</p>
+    <div class="sales-summary" id="salesSummary"></div>
+    <div style="overflow:auto;"><table class="sales-table"><thead><tr><th>Date</th><th>Customer</th><th>Product</th><th>Quantity</th><th>Total</th><th>Payment</th><th>Action</th></tr></thead><tbody id="salesTableBody"></tbody></table></div>
     <div class="inventory-section">
-      <h3>Add a customer</h3>
+      <h3>Customers</h3>
+      <div class="supplier-list" id="customerList"><span class="supplier-chip">No customers yet</span></div>
+    </div>
+    <details class="write-form-section">
+      <summary>Add customer</summary>
+      <div class="write-form-body">
       <div class="company-form-grid">
         <div><label>Customer name *</label><input id="customerName" placeholder="Acme Retail"></div>
         <div><label>Email</label><input id="customerEmail" type="email" placeholder="buyer@company.com"></div>
@@ -523,11 +547,12 @@
         <div><label>Customer segment</label><input id="customerSegment" placeholder="Wholesale, VIP, Retail..."></div>
       </div>
       <div class="company-modal-actions"><button class="export-pdf-btn" id="customerAddBtn">Add Customer</button></div>
-      <div class="supplier-list" id="customerList"><span class="supplier-chip">No customers yet</span></div>
-    </div>
-    <div class="inventory-section">
-      <h3>Record a sale</h3>
-      <div class="inventory-section-note">Recording a sale automatically deducts the quantity from Inventory.</div>
+      </div>
+    </details>
+    <details class="write-form-section">
+      <summary>Record sale</summary>
+      <div class="write-form-body">
+        <div class="inventory-section-note">Recording a sale automatically deducts the quantity from Inventory.</div>
       <div class="company-form-grid">
         <div><label>Product *</label><select id="saleProduct"><option value="">Choose product</option></select></div>
         <div><label>Customer</label><select id="saleCustomer"><option value="">Walk-in / no customer</option></select></div>
@@ -538,8 +563,8 @@
         <div class="full"><label>Reference / note</label><input id="saleReference" placeholder="Invoice number or optional note"></div>
       </div>
       <div class="company-modal-actions"><button class="primary" id="saleAddBtn" style="padding:10px 15px;">Record Sale</button></div>
-    </div>
-    <div class="sales-summary" id="salesSummary"></div>
+      </div>
+    </details>
     <div class="inventory-ai">
       <h3>Ask the Sales &amp; CRM Agent</h3>
       <p>It analyzes your recorded customers, sales, products, payments, and outstanding balances.</p>
@@ -554,7 +579,6 @@
       </div>
       <div class="inventory-ai-answer" id="salesAiAnswer"></div>
     </div>
-    <div style="overflow:auto;"><table class="sales-table"><thead><tr><th>Date</th><th>Customer</th><th>Product</th><th>Quantity</th><th>Total</th><th>Payment</th><th>Action</th></tr></thead><tbody id="salesTableBody"></tbody></table></div>
     <div class="company-modal-actions"><button class="export-pdf-btn" id="salesCloseBtn">Close</button></div>
   </div>
 </div>
@@ -563,8 +587,13 @@
   <div class="company-modal">
     <h2>Finance &amp; Cash Flow</h2>
     <p>Paid sales appear automatically as income. Add operating expenses and other cash movements here.</p>
-    <div class="inventory-section">
-      <h3>Record income or expense</h3>
+    <div class="sales-summary" id="financeSummary"></div>
+    <h3 style="font-size:14px;margin:16px 0 4px;">30-day expense breakdown</h3>
+    <div class="expense-breakdown" id="expenseBreakdown"><span class="supplier-chip">No expenses recorded</span></div>
+    <div style="overflow:auto;"><table class="sales-table"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Amount</th><th>Source</th></tr></thead><tbody id="financeTableBody"></tbody></table></div>
+    <details class="write-form-section">
+      <summary>Record income or expense</summary>
+      <div class="write-form-body">
       <div class="company-form-grid">
         <div><label>Transaction type</label><select id="financeType"><option value="expense">Expense</option><option value="income">Other income</option></select></div>
         <div><label>Amount *</label><input id="financeAmount" type="number" min="0.01" step="0.01" placeholder="500.00"></div>
@@ -573,10 +602,8 @@
         <div class="full"><label>Description</label><input id="financeDescription" placeholder="What was this transaction for?"></div>
       </div>
       <div class="company-modal-actions"><button class="primary" id="financeAddBtn" style="padding:10px 15px;">Add Transaction</button></div>
-    </div>
-    <div class="sales-summary" id="financeSummary"></div>
-    <h3 style="font-size:14px;margin:16px 0 4px;">30-day expense breakdown</h3>
-    <div class="expense-breakdown" id="expenseBreakdown"><span class="supplier-chip">No expenses recorded</span></div>
+      </div>
+    </details>
     <div class="inventory-ai">
       <h3>Ask the Finance Agent</h3>
       <p>It combines recorded cash flow, sales collections, receivables, expenses, and inventory commitments.</p>
@@ -591,7 +618,6 @@
       </div>
       <div class="inventory-ai-answer" id="financeAiAnswer"></div>
     </div>
-    <div style="overflow:auto;"><table class="sales-table"><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Amount</th><th>Source</th></tr></thead><tbody id="financeTableBody"></tbody></table></div>
     <div class="company-modal-actions"><button class="export-pdf-btn" id="financeCloseBtn">Close</button></div>
   </div>
 </div>
@@ -614,19 +640,24 @@
 </div>
 
 <div id="briefingModalOverlay">
-  <div class="company-modal" style="width:min(620px,100%);">
-    <h2>Daily email briefing</h2>
-    <p>Receive one traceable business summary each day. Material alerts may arrive between briefings.</p>
-    <div class="company-form-grid">
+  <div class="company-modal" style="width:min(820px,100%);">
+    <h2>Executive Briefing</h2>
+    <p>Your most important cash, receivables, inventory, and expense signals in one traceable view.</p>
+    <div class="briefing-output" id="briefingOutput">Loading the prepared briefing…</div>
+    <div id="briefingPreferencesPanel">
+      <h3 style="font-size:14px;margin:16px 0 8px;">Email delivery</h3>
+      <div class="company-form-grid">
       <div class="full"><label><input id="briefingEnabled" type="checkbox"> Send email briefings</label></div>
       <div class="full"><label>Delivery email</label><input id="briefingEmail" type="email"></div>
       <div><label>Timezone</label><input id="briefingTimezone" value="Asia/Kuala_Lumpur"></div>
       <div><label>Briefing hour (0–23)</label><input id="briefingHour" type="number" min="0" max="23" value="8"></div>
       <div><label>Quiet hours start</label><input id="briefingQuietStart" type="time" value="22:00"></div>
       <div><label>Quiet hours end</label><input id="briefingQuietEnd" type="time" value="07:00"></div>
+      </div>
+      <div id="briefingStatus" class="quality-result"></div>
+      <div class="company-modal-actions"><button class="primary" id="briefingSaveBtn">Save preferences</button></div>
     </div>
-    <div id="briefingStatus" class="quality-result"></div>
-    <div class="company-modal-actions"><button class="export-pdf-btn" id="briefingCloseBtn">Close</button><button class="primary" id="briefingSaveBtn">Save preferences</button></div>
+    <div class="company-modal-actions"><button class="export-pdf-btn" id="briefingCloseBtn">Close</button></div>
   </div>
 </div>
 
@@ -643,9 +674,9 @@
       <button class="inventory-btn" id="inventoryOpenBtn">Inventory</button>
       <button class="finance-btn" id="financeOpenBtn">Finance &amp; Cash Flow</button>
       <button class="data-btn" id="briefingOpenBtn">Executive Briefing</button>
+      <button class="new-research-btn" id="newResearchBtn">Business Research Agents</button>
       <details class="more-nav" id="moreNav">
         <summary>More</summary>
-        <button class="new-research-btn" id="newResearchBtn">+ New Research</button>
         <button class="company-btn" id="companyProfileBtn">My Company</button>
         <button class="sales-btn" id="salesOpenBtn">Sales &amp; CRM</button>
         <button class="data-btn" id="shopifyOpenBtn">Shopify Sync</button>
@@ -666,7 +697,7 @@
       You are viewing fictional sample company data. Changes are disabled.
       <a id="demoSignupLink">Sign up for your own workspace</a>
     </div>
-    <div class="wrap">
+    <div class="wrap" id="researchWorkspace">
       <header>
         <h1>
           <span class="logo-icon">
@@ -683,9 +714,10 @@
             </svg>
             <span class="ai-badge">AI</span>
           </span>
-          <span class="gradient-text">Business Research Agents</span>
+          <span class="gradient-text">VentureCore AI</span>
         </h1>
-        <p>4 specialist AI agents research your idea, orchestrated automatically behind the scenes</p>
+        <p>Know what to reorder, who owes you money, and where your cash is going.</p>
+        <div style="margin-top:8px;color:var(--muted);font-size:12px;">Business Research Agents</div>
       </header>
 
       <div class="mode-toggle">
@@ -857,6 +889,8 @@ const shopifyDisconnectBtn = document.getElementById("shopifyDisconnectBtn");
 const shopifyCloseBtn = document.getElementById("shopifyCloseBtn");
 const briefingOpenBtn = document.getElementById("briefingOpenBtn");
 const briefingModalOverlay = document.getElementById("briefingModalOverlay");
+const briefingOutput = document.getElementById("briefingOutput");
+const briefingPreferencesPanel = document.getElementById("briefingPreferencesPanel");
 const briefingEnabled = document.getElementById("briefingEnabled");
 const briefingEmail = document.getElementById("briefingEmail");
 const briefingTimezone = document.getElementById("briefingTimezone");
@@ -866,6 +900,7 @@ const briefingQuietEnd = document.getElementById("briefingQuietEnd");
 const briefingStatus = document.getElementById("briefingStatus");
 const briefingSaveBtn = document.getElementById("briefingSaveBtn");
 const briefingCloseBtn = document.getElementById("briefingCloseBtn");
+const researchWorkspace = document.getElementById("researchWorkspace");
 const dataCheckOpenBtn = document.getElementById("dataCheckOpenBtn");
 const companyModalOverlay = document.getElementById("companyModalOverlay");
 const companyUseRow = document.getElementById("companyUseRow");
@@ -998,6 +1033,7 @@ const MOBILE_BREAKPOINT = 760;
 function isMobile() { return window.innerWidth <= MOBILE_BREAKPOINT; }
 
 function setSidebarOpen(open) {
+  document.body.classList.toggle("sidebar-collapsed", !open);
   if (open) {
     sidebar.classList.remove("collapsed");
     sidebarToggle.classList.remove("shifted");
@@ -1008,8 +1044,13 @@ function setSidebarOpen(open) {
     sidebarBackdrop.classList.remove("visible");
   }
 }
-setSidebarOpen(!isMobile());
-sidebarToggle.addEventListener("click", () => setSidebarOpen(sidebar.classList.contains("collapsed")));
+const savedSidebarState = localStorage.getItem("venturecore.sidebar.open");
+setSidebarOpen(savedSidebarState === null ? true : savedSidebarState === "true");
+sidebarToggle.addEventListener("click", () => {
+  const open = sidebar.classList.contains("collapsed");
+  setSidebarOpen(open);
+  localStorage.setItem("venturecore.sidebar.open", String(open));
+});
 sidebarBackdrop.addEventListener("click", () => setSidebarOpen(false));
 window.addEventListener("resize", () => { if (!isMobile() && sidebarBackdrop.classList.contains("visible")) sidebarBackdrop.classList.remove("visible"); });
 
@@ -1183,7 +1224,7 @@ async function recordStockMovement(item, transactionType) {
   if (!res.ok) { alert(data.detail || "Could not record stock movement."); return; }
   loadInventory();
 }
-inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } dataModalOverlay.classList.remove("visible"); salesModalOverlay.classList.remove("visible"); financeModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.add("visible"); await Promise.all([loadSuppliers(), loadInventory()]); });
+inventoryOpenBtn.addEventListener("click", async () => { if (isGuest) { authOverlay.style.display = "flex"; return; } dataModalOverlay.classList.remove("visible"); salesModalOverlay.classList.remove("visible"); financeModalOverlay.classList.remove("visible"); briefingModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.add("visible"); await Promise.all([loadSuppliers(), loadInventory()]); });
 inventoryCloseBtn.addEventListener("click", () => inventoryModalOverlay.classList.remove("visible"));
 inventoryModalOverlay.addEventListener("click", event => { if (event.target === inventoryModalOverlay) inventoryModalOverlay.classList.remove("visible"); });
 supplierAddBtn.addEventListener("click", async () => {
@@ -1274,6 +1315,7 @@ salesOpenBtn.addEventListener("click", async () => {
   dataModalOverlay.classList.remove("visible");
   inventoryModalOverlay.classList.remove("visible");
   financeModalOverlay.classList.remove("visible");
+  briefingModalOverlay.classList.remove("visible");
   salesModalOverlay.classList.add("visible");
   await loadSalesWorkspace();
 });
@@ -1355,7 +1397,7 @@ document.querySelectorAll(".finance-question-btn").forEach(button => button.addE
 financeQuestion.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); askFinanceAgent(); } });
 financeOpenBtn.addEventListener("click", async () => {
   if (isGuest) { authOverlay.style.display = "flex"; return; }
-  dataModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.remove("visible"); salesModalOverlay.classList.remove("visible");
+  dataModalOverlay.classList.remove("visible"); inventoryModalOverlay.classList.remove("visible"); salesModalOverlay.classList.remove("visible"); briefingModalOverlay.classList.remove("visible");
   financeModalOverlay.classList.add("visible");
   if (!financeDate.value) financeDate.value = localDateString();
   await loadFinanceWorkspace();
@@ -1633,19 +1675,8 @@ const demoWriteControls = [
   companySaveBtn, dataCheckBtn, supplierAddBtn, productAddBtn,
   customerAddBtn, saleAddBtn, financeAddBtn, submitBtn, followupSendBtn
 ];
-const demoWriteAreas = [companyModalOverlay, dataModalOverlay, inventoryModalOverlay, salesModalOverlay, financeModalOverlay];
-
 function setDemoReadOnly(readOnly) {
-  demoWriteControls.forEach(control => { control.disabled = readOnly; control.style.display = readOnly ? "none" : ""; });
-  demoWriteAreas.forEach(area => {
-    area.querySelectorAll("input, select, textarea").forEach(control => {
-      const isAiQuestion = [inventoryQuestion, salesQuestion, financeQuestion].includes(control);
-      control.disabled = readOnly && !isAiQuestion;
-    });
-  });
-  questionEl.disabled = readOnly;
-  researchSetup.querySelectorAll("input, select, textarea").forEach(control => { control.disabled = readOnly; });
-  newResearchBtn.disabled = readOnly;
+  demoWriteControls.forEach(control => { control.style.display = readOnly ? "none" : ""; });
 }
 
 function enterGuestMode() {
@@ -1653,6 +1684,7 @@ function enterGuestMode() {
   isDemo = false;
   document.body.classList.remove("demo-mode");
   authOverlay.style.display = "none";
+  researchWorkspace.style.display = "block";
   demoBanner.style.display = "none";
   demoViewBtn.style.display = "block";
   setDemoReadOnly(false);
@@ -1672,11 +1704,12 @@ function enterGuestMode() {
   companyUseRow.style.display = "none";
 }
 
-async function enterDemoMode(openDashboard = false) {
+async function enterDemoMode() {
   isGuest = false;
   isDemo = true;
   document.body.classList.add("demo-mode");
   authOverlay.style.display = "none";
+  researchWorkspace.style.display = "none";
   demoBanner.style.display = "flex";
   demoViewBtn.style.display = "none";
   sidebarUserBlock.style.display = "block";
@@ -1687,20 +1720,17 @@ async function enterDemoMode(openDashboard = false) {
   historyList.style.display = "flex";
   userEmailEl.textContent = "Demo workspace";
   logoutBtn.textContent = "Exit demo";
-  companyProfileBtn.style.display = "block";
+  companyProfileBtn.style.display = "none";
   inventoryOpenBtn.style.display = "block";
   salesOpenBtn.style.display = "block";
   financeOpenBtn.style.display = "block";
   shopifyOpenBtn.style.display = "none";
   briefingOpenBtn.style.display = "block";
-  dataCheckOpenBtn.style.display = "block";
+  dataCheckOpenBtn.style.display = "none";
   companyUseRow.style.display = "none";
   setDemoReadOnly(true);
   await loadHistory();
-  if (openDashboard) {
-    inventoryModalOverlay.classList.add("visible");
-    await Promise.all([loadSuppliers(), loadInventory()]);
-  }
+  await openDemoBriefing();
 }
 
 demoViewBtn.addEventListener("click", async () => {
@@ -1708,7 +1738,7 @@ demoViewBtn.addEventListener("click", async () => {
   const response = await fetch("/demo/start", { method: "POST" });
   demoViewBtn.disabled = false;
   if (!response.ok) { alert("The demo could not be opened. Please try again."); return; }
-  await enterDemoMode(true);
+  await enterDemoMode();
 });
 
 demoSignupLink.addEventListener("click", async () => {
@@ -1725,6 +1755,7 @@ async function afterLogin(email) {
   isDemo = false;
   document.body.classList.remove("demo-mode");
   demoBanner.style.display = "none";
+  researchWorkspace.style.display = "block";
   demoViewBtn.style.display = "none";
   logoutBtn.textContent = "Log out";
   setDemoReadOnly(false);
@@ -1796,23 +1827,60 @@ shopifyDisconnectBtn.addEventListener("click", async () => {
   await loadShopifyStatus();
 });
 
+function combinedSourceRows(...groups) {
+  const result = {};
+  groups.forEach(group => Object.entries(group || {}).forEach(([table, ids]) => {
+    result[table] = [...new Set([...(result[table] || []), ...ids])];
+  }));
+  return result;
+}
+
+function renderDemoBriefing(briefing) {
+  const content = briefing.content || {};
+  const metrics = content.metrics || {};
+  const cash = metrics.cash || {};
+  const receivables = metrics.overdue_receivables || [];
+  const stockouts = metrics.stockout_products || [];
+  const anomalies = metrics.expense_anomalies || [];
+  const toolInputs = { as_of: metrics.as_of };
+  const cashWorkings = { tool:"get_daily_briefing_metrics", inputs:toolInputs, source_row_ids:cash.source_row_ids || {} };
+  const receivableRows = combinedSourceRows(...receivables.map(item => item.source_row_ids || {}));
+  const stockRows = combinedSourceRows(...stockouts.map(item => item.source_row_ids || {}));
+  const anomalyRows = anomalies.reduce((all, item) => combinedSourceRows(all, item.source_row_ids, item.baseline_source_row_ids), {});
+  briefingOutput.innerHTML =
+    '<div class="briefing-block"><h3>Cash position</h3><strong>' + currency(cash.recorded_cash_balance_minor, metrics.currency) + '</strong>' +
+      '<p>Recorded net cash movement changed by ' + currency(cash.change_minor, metrics.currency) + ' against the previous period.</p>' + workingsHtml(cashWorkings) + '</div>' +
+    '<div class="briefing-block"><h3>Receivables needing attention</h3>' +
+      (receivables.length ? '<ul>' + receivables.map(item => '<li><strong>' + escapeHtml(item.customer_name) + '</strong> owes ' + currency(item.amount_minor, item.currency) + ', due ' + escapeHtml(item.due_date) + '.</li>').join('') + '</ul>' : '<p>No overdue receivables.</p>') +
+      workingsHtml({ tool:"get_daily_briefing_metrics", inputs:toolInputs, source_row_ids:receivableRows }) + '</div>' +
+    '<div class="briefing-block"><h3>Products approaching a stockout</h3>' +
+      (stockouts.length ? '<ul>' + stockouts.map(item => '<li><strong>' + escapeHtml(item.name) + '</strong>: ' + escapeHtml(item.current_stock) + ' units on hand, ' + escapeHtml(item.days_of_cover) + ' days of cover.</li>').join('') + '</ul>' : '<p>No material stockout risk.</p>') +
+      workingsHtml({ tool:"get_daily_briefing_metrics", inputs:toolInputs, source_row_ids:stockRows }) + '</div>' +
+    '<div class="briefing-block"><h3>Expense changes</h3>' +
+      (anomalies.length ? '<ul>' + anomalies.map(item => '<li><strong>' + escapeHtml(item.category) + '</strong>: ' + currency(item.current_amount_minor, item.currency) + ', up ' + escapeHtml(item.increase_percent) + '% from its trailing baseline of ' + currency(item.baseline_average_minor, item.currency) + '.</li>').join('') + '</ul>' : '<p>No material expense anomaly.</p>') +
+      workingsHtml({ tool:"get_daily_briefing_metrics", inputs:toolInputs, source_row_ids:anomalyRows }) + '</div>' +
+    '<div class="briefing-block"><h3>Priorities</h3><ol>' + (content.actions || []).map(action => '<li>' + escapeHtml(action) + '</li>').join('') + '</ol></div>';
+}
+
+async function openDemoBriefing() {
+  [inventoryModalOverlay, salesModalOverlay, financeModalOverlay, dataModalOverlay, companyModalOverlay, shopifyModalOverlay].forEach(overlay => overlay.classList.remove("visible"));
+  briefingPreferencesPanel.style.display = "none";
+  briefingOutput.style.display = "block";
+  briefingOutput.textContent = "Loading the prepared briefing…";
+  briefingModalOverlay.classList.add("visible");
+  const response = await fetch("/briefings/demo");
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) { briefingOutput.textContent = data.detail || "The sample briefing is unavailable."; return; }
+  renderDemoBriefing(data);
+}
+
 briefingOpenBtn.addEventListener("click", async () => {
   briefingStatus.style.display = "none";
-  const briefingControls = [briefingEnabled, briefingEmail, briefingTimezone, briefingHour, briefingQuietStart, briefingQuietEnd, briefingSaveBtn];
   if (isDemo) {
-    briefingEnabled.checked = true;
-    briefingEmail.value = "owner@example.invalid";
-    briefingTimezone.value = "Asia/Kuala_Lumpur";
-    briefingHour.value = 8;
-    briefingQuietStart.value = "22:00";
-    briefingQuietEnd.value = "07:00";
-    briefingControls.forEach(control => { control.disabled = true; });
-    briefingStatus.style.display = "block";
-    briefingStatus.textContent = "Sample delivery preferences are read-only in the demo workspace.";
-    briefingModalOverlay.classList.add("visible");
-    return;
+    await openDemoBriefing(); return;
   }
-  briefingControls.forEach(control => { control.disabled = false; });
+  briefingOutput.style.display = "none";
+  briefingPreferencesPanel.style.display = "block";
   const response = await fetch("/briefings/preferences");
   const data = await response.json().catch(() => ({}));
   if (!response.ok) { alert(data.detail || "Briefing preferences are unavailable."); return; }
@@ -1850,7 +1918,7 @@ async function checkAuth() {
   const res = await fetch("/auth/me");
   const data = await res.json();
   if (data.logged_in) { authOverlay.style.display = "none"; await afterLogin(data.email); }
-  else if (data.demo_mode) { await enterDemoMode(false); }
+  else if (data.demo_mode) { await enterDemoMode(); }
   else { enterGuestMode(); }
 }
 checkAuth();
@@ -1941,7 +2009,15 @@ async function loadJob(jobId) {
 }
 
 newResearchBtn.addEventListener("click", () => {
+  if (isDemo) {
+    setAuthMode("signup");
+    authOverlay.style.display = "flex";
+    return;
+  }
   if (isResearching) return;
+  [inventoryModalOverlay, salesModalOverlay, financeModalOverlay, briefingModalOverlay, dataModalOverlay, companyModalOverlay, shopifyModalOverlay].forEach(overlay => overlay.classList.remove("visible"));
+  researchWorkspace.style.display = "block";
+  document.querySelector(".main-area").scrollTo({ top:0, behavior:"smooth" });
   currentJobId = null;
   currentSections = {};
   questionEl.value = "";

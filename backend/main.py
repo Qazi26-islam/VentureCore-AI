@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
@@ -12,6 +12,7 @@ from backend.api.workers import router as workers_router
 from backend.config import SESSION_SECRET
 from backend.db import init_db
 from backend.seed_demo import seed_demo
+from backend.demo_briefing import regenerate_demo_briefing
 from backend.shopify import start_reconciliation_worker
 
 logging.basicConfig(
@@ -36,9 +37,12 @@ app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 def startup_event():
     init_db()
     seed_demo()
+    regenerate_demo_briefing()
     start_reconciliation_worker()
 
 
 @app.get("/")
-def root():
+def root(request: Request):
+    if request.session.get("user_id") is None and not request.session.get("demo_mode"):
+        request.session["demo_mode"] = True
     return FileResponse(FRONTEND_DIR / "index.html")
