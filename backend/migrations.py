@@ -18,6 +18,7 @@ from backend.money import (
 logger = logging.getLogger("database_migrations")
 MIGRATION_VERSION = 1
 OBSERVABILITY_MIGRATION_VERSION = 2
+SHOPIFY_MIGRATION_VERSION = 3
 DOMAIN_TABLES = (
     "research_jobs",
     "follow_up_messages",
@@ -444,6 +445,72 @@ def _downgrade_observability(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users DROP COLUMN role")
 
 
+def _upgrade_shopify(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE IF NOT EXISTS shopify_connections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        organization_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        shop_domain TEXT NOT NULL,
+        access_token_encrypted TEXT NOT NULL,
+        refresh_token_encrypted TEXT,
+        token_expires_at TEXT,
+        refresh_token_expires_at TEXT,
+        scopes TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'connected'
+            CHECK(status IN ('connected', 'syncing', 'stale', 'error', 'disconnected')),
+        sync_resource TEXT,
+        sync_cursor TEXT,
+        sync_mode TEXT,
+        last_attempt_at TEXT,
+        last_successful_sync_at TEXT,
+        records_synced INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id),
+        UNIQUE(shop_domain),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id),
+        FOREIGN KEY (user_id) REFERENCES users(id))""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS shopify_webhook_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        organization_id INTEGER NOT NULL,
+        connection_id INTEGER NOT NULL,
+        webhook_id TEXT NOT NULL,
+        event_id TEXT,
+        topic TEXT NOT NULL,
+        payload_encrypted TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'received'
+            CHECK(status IN ('received', 'processed', 'dead_letter')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        processed_at TEXT,
+        UNIQUE(connection_id, webhook_id),
+        FOREIGN KEY (organization_id) REFERENCES organizations(id),
+        FOREIGN KEY (connection_id) REFERENCES shopify_connections(id) ON DELETE CASCADE)""")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_shopify_connections_reconcile "
+        "ON shopify_connections(status, last_successful_sync_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS ix_shopify_webhooks_status "
+        "ON shopify_webhook_events(organization_id, status)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)",
+        (SHOPIFY_MIGRATION_VERSION,),
+    )
+
+
+def _downgrade_shopify(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE IF EXISTS shopify_webhook_events")
+    conn.execute("DROP TABLE IF EXISTS shopify_connections")
+    conn.execute(
+        "DELETE FROM schema_migrations WHERE version = ?",
+        (SHOPIFY_MIGRATION_VERSION,),
+    )
+
+
 def upgrade(conn: sqlite3.Connection) -> None:
     conn.row_factory = sqlite3.Row
     conn.execute(USERS_SCHEMA)
@@ -454,6 +521,7 @@ def upgrade(conn: sqlite3.Connection) -> None:
     if conn.execute("SELECT 1 FROM schema_migrations WHERE version = ?", (MIGRATION_VERSION,)).fetchone():
         _create_sync_indexes(conn)
         _upgrade_observability(conn)
+        _upgrade_shopify(conn)
         conn.commit()
         return
 
@@ -479,6 +547,7 @@ def upgrade(conn: sqlite3.Connection) -> None:
         _create_sync_indexes(conn)
         conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (MIGRATION_VERSION,))
         _upgrade_observability(conn)
+        _upgrade_shopify(conn)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -498,6 +567,7 @@ def downgrade(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
         conn.execute("BEGIN IMMEDIATE")
+        _downgrade_shopify(conn)
         _downgrade_observability(conn)
         _replace_tables(conn, LEGACY_SCHEMAS, rows_by_table, _downgrade_row)
         conn.execute("DELETE FROM schema_migrations WHERE version = ?", (MIGRATION_VERSION,))

@@ -69,8 +69,8 @@
   .company-use { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; margin: -4px 0 14px; cursor: pointer; }
   #companyModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
   #companyModalOverlay.visible { display: flex; }
-  #dataModalOverlay, #inventoryModalOverlay, #salesModalOverlay, #financeModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
-  #dataModalOverlay.visible, #inventoryModalOverlay.visible, #salesModalOverlay.visible, #financeModalOverlay.visible { display: flex; }
+  #dataModalOverlay, #inventoryModalOverlay, #salesModalOverlay, #financeModalOverlay, #shopifyModalOverlay { display: none; position: fixed; inset: 0; z-index: 110; align-items: center; justify-content: center; padding: 20px; background: rgba(5,7,12,.85); backdrop-filter: blur(6px); }
+  #dataModalOverlay.visible, #inventoryModalOverlay.visible, #salesModalOverlay.visible, #financeModalOverlay.visible, #shopifyModalOverlay.visible { display: flex; }
   .company-modal { width: min(680px, 100%); max-height: 88vh; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
   #inventoryModalOverlay .company-modal { width:min(1080px, 100%); }
   #salesModalOverlay .company-modal { width:min(980px, 100%); }
@@ -590,6 +590,23 @@
   </div>
 </div>
 
+<div id="shopifyModalOverlay">
+  <div class="company-modal" style="width:min(560px,100%);">
+    <h2>Shopify data connection</h2>
+    <p>Bring your products, inventory, customers and orders into VentureCore automatically.</p>
+    <div id="shopifyStatus" class="quality-result" style="display:block;">Checking your connection…</div>
+    <div class="company-form-grid" id="shopifyConnectForm" style="margin-top:14px;">
+      <div class="full"><label>Shopify store address</label><input id="shopifyShop" placeholder="your-store.myshopify.com"></div>
+    </div>
+    <div class="company-modal-actions">
+      <button class="export-pdf-btn" id="shopifyCloseBtn">Close</button>
+      <button class="export-pdf-btn" id="shopifyDisconnectBtn" style="display:none;">Disconnect</button>
+      <button class="export-pdf-btn" id="shopifySyncBtn" style="display:none;">Sync now</button>
+      <button class="primary" id="shopifyConnectBtn">Connect Shopify</button>
+    </div>
+  </div>
+</div>
+
 <div class="app-layout">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-inner">
@@ -604,6 +621,7 @@
       <button class="inventory-btn" id="inventoryOpenBtn">Inventory</button>
       <button class="sales-btn" id="salesOpenBtn">Sales &amp; CRM</button>
       <button class="finance-btn" id="financeOpenBtn">Finance &amp; Cash Flow</button>
+      <button class="data-btn" id="shopifyOpenBtn">Shopify Sync</button>
       <button class="data-btn" id="dataCheckOpenBtn">Check Business Data</button>
       <input type="text" class="history-search" id="historySearch" placeholder="Search research...">
       <div class="history-label">
@@ -799,6 +817,15 @@ const companyProfileBtn = document.getElementById("companyProfileBtn");
 const inventoryOpenBtn = document.getElementById("inventoryOpenBtn");
 const salesOpenBtn = document.getElementById("salesOpenBtn");
 const financeOpenBtn = document.getElementById("financeOpenBtn");
+const shopifyOpenBtn = document.getElementById("shopifyOpenBtn");
+const shopifyModalOverlay = document.getElementById("shopifyModalOverlay");
+const shopifyStatus = document.getElementById("shopifyStatus");
+const shopifyConnectForm = document.getElementById("shopifyConnectForm");
+const shopifyShop = document.getElementById("shopifyShop");
+const shopifyConnectBtn = document.getElementById("shopifyConnectBtn");
+const shopifySyncBtn = document.getElementById("shopifySyncBtn");
+const shopifyDisconnectBtn = document.getElementById("shopifyDisconnectBtn");
+const shopifyCloseBtn = document.getElementById("shopifyCloseBtn");
 const dataCheckOpenBtn = document.getElementById("dataCheckOpenBtn");
 const companyModalOverlay = document.getElementById("companyModalOverlay");
 const companyUseRow = document.getElementById("companyUseRow");
@@ -1598,6 +1625,7 @@ function enterGuestMode() {
   inventoryOpenBtn.style.display = "none";
   salesOpenBtn.style.display = "none";
   financeOpenBtn.style.display = "none";
+  shopifyOpenBtn.style.display = "none";
   dataCheckOpenBtn.style.display = "none";
   companyUseRow.style.display = "none";
 }
@@ -1620,6 +1648,7 @@ async function enterDemoMode(openDashboard = false) {
   inventoryOpenBtn.style.display = "block";
   salesOpenBtn.style.display = "block";
   financeOpenBtn.style.display = "block";
+  shopifyOpenBtn.style.display = "none";
   dataCheckOpenBtn.style.display = "block";
   companyUseRow.style.display = "none";
   setDemoReadOnly(true);
@@ -1665,6 +1694,7 @@ async function afterLogin(email) {
   inventoryOpenBtn.style.display = "block";
   salesOpenBtn.style.display = "block";
   financeOpenBtn.style.display = "block";
+  shopifyOpenBtn.style.display = "block";
   dataCheckOpenBtn.style.display = "block";
   const profileRes = await fetch("/company/profile");
   const profile = profileRes.ok ? await profileRes.json() : null;
@@ -1672,6 +1702,53 @@ async function afterLogin(email) {
   companyUseRow.style.display = profile ? "flex" : "none";
   await loadHistory();
 }
+
+function describeShopifyStatus(data) {
+  if (!data.configured) return "Shopify is not configured on this server yet. Add the Shopify environment settings in Render first.";
+  if (!data.connected) return "No Shopify store is connected. Enter the permanent .myshopify.com store address below.";
+  const lastSync = data.last_successful_sync ? new Date(data.last_successful_sync + "Z").toLocaleString() : "not completed yet";
+  let message = `${data.shop} is connected. Last successful sync: ${lastSync}. ${data.records_synced || 0} records have been synced.`;
+  if (data.status === "syncing") message += " A sync is currently running.";
+  if (data.error) message += ` Your saved data is still usable, but the latest sync needs attention: ${data.error}`;
+  return message;
+}
+
+async function loadShopifyStatus() {
+  shopifyStatus.textContent = "Checking your connection…";
+  const response = await fetch("/integrations/shopify/status");
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) { shopifyStatus.textContent = data.detail || "Shopify status is unavailable."; return; }
+  shopifyStatus.textContent = describeShopifyStatus(data);
+  shopifyConnectForm.style.display = data.connected ? "none" : "grid";
+  shopifyConnectBtn.style.display = data.connected ? "none" : "inline-block";
+  shopifySyncBtn.style.display = data.connected ? "inline-block" : "none";
+  shopifyDisconnectBtn.style.display = data.connected ? "inline-block" : "none";
+}
+
+shopifyOpenBtn.addEventListener("click", async () => {
+  shopifyModalOverlay.classList.add("visible");
+  await loadShopifyStatus();
+});
+shopifyCloseBtn.addEventListener("click", () => shopifyModalOverlay.classList.remove("visible"));
+shopifyModalOverlay.addEventListener("click", event => { if (event.target === shopifyModalOverlay) shopifyModalOverlay.classList.remove("visible"); });
+shopifyConnectBtn.addEventListener("click", () => {
+  const shop = shopifyShop.value.trim();
+  if (!shop) { shopifyStatus.textContent = "Enter your .myshopify.com store address first."; return; }
+  location.href = "/integrations/shopify/install?shop=" + encodeURIComponent(shop);
+});
+shopifySyncBtn.addEventListener("click", async () => {
+  shopifySyncBtn.disabled = true;
+  shopifyStatus.textContent = "Syncing Shopify now. Your existing VentureCore data remains available.";
+  const response = await fetch("/integrations/shopify/sync", { method: "POST" });
+  const data = await response.json().catch(() => ({}));
+  shopifySyncBtn.disabled = false;
+  shopifyStatus.textContent = response.ok ? describeShopifyStatus(data) : (data.detail || "Shopify could not sync right now. Your previous data is unchanged.");
+});
+shopifyDisconnectBtn.addEventListener("click", async () => {
+  if (!confirm("Disconnect Shopify? Existing synced records will remain available.")) return;
+  await fetch("/integrations/shopify", { method: "DELETE" });
+  await loadShopifyStatus();
+});
 
 async function checkAuth() {
   const res = await fetch("/auth/me");

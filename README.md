@@ -27,6 +27,23 @@ integer USD cents per million tokens. Keep this configuration aligned with the p
 pricing; an empty mapping records actual tokens and a zero cost, which is appropriate for a
 free-tier deployment.
 
+## Shopify connector
+
+Create a Shopify public app with the callback URL
+`https://YOUR_RENDER_HOST/integrations/shopify/callback` and the webhook URL
+`https://YOUR_RENDER_HOST/integrations/shopify/webhook`. Configure the read-only scopes shown in
+`.env.example`, then add `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_APP_URL`, and a
+fresh `SHOPIFY_TOKEN_ENCRYPTION_KEY` to Render. Generate the encryption key once with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Signed-in users can then open **Shopify Sync** in the sidebar. The first connection launches a
+resumable backfill. Verified webhooks keep data current, and a periodic `updated_at`
+reconciliation pass repairs missed events. Sync errors leave the last successfully synced data
+available and are shown in plain language in the connection panel.
+
 ## Public demo
 
 Startup automatically creates or refreshes the fictional, read-only Harbour & Pine demo

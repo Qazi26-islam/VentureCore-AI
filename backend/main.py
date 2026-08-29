@@ -9,8 +9,10 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from backend.api.research import router as research_router
 from backend.api.auth import router as auth_router
+from backend.api.shopify import router as shopify_router
 from backend.db import init_db
 from backend.seed_demo import seed_demo
+from backend.shopify import start_reconciliation_worker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +26,7 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 
 app.include_router(research_router)
 app.include_router(auth_router)
+app.include_router(shopify_router)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
@@ -33,6 +36,7 @@ app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 def startup_event():
     init_db()
     seed_demo()
+    start_reconciliation_worker()
 
 
 @app.get("/")
