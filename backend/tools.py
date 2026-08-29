@@ -695,7 +695,7 @@ def _daily_briefing_metrics(
     try:
         transactions = connection.execute(
             """SELECT id, transaction_type, amount_minor, currency, category,
-                      transaction_date
+                      description, transaction_date
                  FROM finance_transactions
                 WHERE user_id = ? AND organization_id = ? AND transaction_date <= ?
                 ORDER BY transaction_date, id""",
@@ -727,6 +727,43 @@ def _daily_briefing_metrics(
             for row in transactions
         )
         change_percent = _rounded_percent(change, previous_net)
+        cash_inflows = sum(
+            int(row["amount_minor"]) for row in transactions if row["transaction_type"] == "income"
+        )
+        cash_outflows = sum(
+            int(row["amount_minor"]) for row in transactions if row["transaction_type"] == "expense"
+        )
+        cash_rows = [
+            {
+                "id": int(row["id"]),
+                "date": row["transaction_date"],
+                "description": row["description"] or row["category"] or "Recorded transaction",
+                "category": row["category"] or "Other",
+                "transaction_type": row["transaction_type"],
+                "amount_minor": int(row["amount_minor"]),
+                "currency": row["currency"],
+            }
+            for row in transactions
+        ]
+        monthly: dict[str, dict[str, Any]] = {}
+        running_balance = 0
+        for row in transactions:
+            month = str(row["transaction_date"])[:7]
+            point = monthly.setdefault(
+                month,
+                {"month": month, "inflows_minor": 0, "outflows_minor": 0, "source_row_ids": []},
+            )
+            if row["transaction_type"] == "income":
+                point["inflows_minor"] += int(row["amount_minor"])
+            else:
+                point["outflows_minor"] += int(row["amount_minor"])
+            point["source_row_ids"].append(int(row["id"]))
+        cash_trend = []
+        for point in monthly.values():
+            point["net_minor"] = point["inflows_minor"] - point["outflows_minor"]
+            running_balance += point["net_minor"]
+            point["ending_balance_minor"] = running_balance
+            cash_trend.append(point)
         cash = {
             "recorded_cash_balance_minor": cash_balance,
             "current_net_cash_flow_minor": current_net,
@@ -740,6 +777,12 @@ def _daily_briefing_metrics(
                 and change_percent <= -body.cash_drop_percent
             ),
             "currency": currency,
+            "inflows_minor": cash_inflows,
+            "outflows_minor": cash_outflows,
+            "inflow_count": sum(1 for row in transactions if row["transaction_type"] == "income"),
+            "outflow_count": sum(1 for row in transactions if row["transaction_type"] == "expense"),
+            "workings_rows": cash_rows,
+            "trend": cash_trend,
             "source_row_ids": {
                 "finance_transactions": [int(row["id"]) for row in transactions]
             },
@@ -751,7 +794,7 @@ def _daily_briefing_metrics(
 
         receivable_rows = connection.execute(
             """SELECT s.id, s.customer_id, s.total_amount_minor, s.currency,
-                      s.due_date, c.name AS customer_name
+                      s.due_date, s.created_at, s.reference_note, c.name AS customer_name
                  FROM sales_orders s
                  LEFT JOIN customers c
                    ON c.id = s.customer_id AND c.organization_id = s.organization_id
@@ -768,7 +811,17 @@ def _daily_briefing_metrics(
                 "amount_minor": int(row["total_amount_minor"]),
                 "currency": row["currency"],
                 "due_date": row["due_date"],
+                "days_overdue": (as_of - date.fromisoformat(row["due_date"])).days,
                 "material": int(row["total_amount_minor"]) >= body.receivable_min_minor,
+                "workings_rows": [
+                    {
+                        "id": int(row["id"]),
+                        "date": str(row["created_at"])[:10],
+                        "description": f"Invoice for {row['customer_name'] or 'Unknown customer'}",
+                        "amount_minor": int(row["total_amount_minor"]),
+                        "currency": row["currency"],
+                    }
+                ],
                 "source_row_ids": {
                     "sales_orders": [int(row["id"])],
                     "customers": [int(row["customer_id"])] if row["customer_id"] else [],
@@ -781,19 +834,40 @@ def _daily_briefing_metrics(
             context,
             SnapshotInput(lookback_days=body.velocity_days, as_of=as_of),
         )
-        stockout_products = [
-            {
+        stockout_products = []
+        for item in inventory.items:
+            if not (
+                item.current_stock <= 0
+                or (item.days_of_stock is not None and item.days_of_stock <= body.stockout_days)
+            ):
+                continue
+            movement_rows = connection.execute(
+                """SELECT id, created_at, transaction_type, quantity_change, reference_note
+                     FROM inventory_transactions
+                    WHERE organization_id = ? AND user_id = ? AND product_id = ?
+                    ORDER BY created_at, id""",
+                (context.organization_id, context.user_id, item.id),
+            ).fetchall()
+            stockout_products.append({
                 "product_id": item.id,
                 "name": item.name,
                 "current_stock": item.current_stock,
                 "days_of_cover": item.days_of_stock,
+                "units_sold": item.units_sold,
+                "velocity_days": body.velocity_days,
+                "average_daily_sales": item.average_daily_sales,
                 "currency": item.currency,
+                "workings_rows": [
+                    {
+                        "id": int(row["id"]),
+                        "date": str(row["created_at"])[:10],
+                        "description": row["reference_note"] or row["transaction_type"],
+                        "quantity_change": float(row["quantity_change"]),
+                    }
+                    for row in movement_rows
+                ],
                 "source_row_ids": item.source_row_ids,
-            }
-            for item in inventory.items
-            if item.current_stock <= 0
-            or (item.days_of_stock is not None and item.days_of_stock <= body.stockout_days)
-        ]
+            })
 
         expense_rows = [
             row for row in transactions if row["transaction_type"] == "expense"
@@ -836,6 +910,27 @@ def _daily_briefing_metrics(
                         "increase_minor": increase,
                         "increase_percent": increase_percent,
                         "currency": currency,
+                        "workings_rows": [
+                            {
+                                "id": int(row["id"]),
+                                "date": row["transaction_date"],
+                                "description": row["description"] or category,
+                                "period": "current",
+                                "amount_minor": int(row["amount_minor"]),
+                                "currency": row["currency"],
+                            }
+                            for row in current_rows
+                        ] + [
+                            {
+                                "id": int(row["id"]),
+                                "date": row["transaction_date"],
+                                "description": row["description"] or category,
+                                "period": "baseline",
+                                "amount_minor": int(row["amount_minor"]),
+                                "currency": row["currency"],
+                            }
+                            for row in baseline_rows
+                        ],
                         "source_row_ids": {
                             "finance_transactions": [int(row["id"]) for row in current_rows]
                         },

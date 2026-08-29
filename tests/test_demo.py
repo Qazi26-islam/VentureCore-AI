@@ -102,7 +102,7 @@ class PublicDemoTests(unittest.TestCase):
                 ORDER BY transaction_date""",
             (database.DEMO_ORGANIZATION_ID, SOURCE),
         ).fetchall()
-        self.assertEqual([row[0] for row in marketing[-3:]], [60_000, 105_000, 180_000])
+        self.assertEqual([row[0] for row in marketing[-3:]], [20_000, 35_000, 60_000])
 
         recorded_sales = conn.execute(
             "SELECT SUM(total_amount_minor) FROM sales_orders WHERE organization_id = ?",
@@ -121,6 +121,9 @@ class PublicDemoTests(unittest.TestCase):
         conn.close()
         self.assertEqual(recorded_sales, result["sales_total_minor"])
         self.assertEqual(recorded_paid, linked_income)
+        operating_surplus = result["paid_sales_minor"] - result["expenses_total_minor"]
+        self.assertGreater(operating_surplus, 0)
+        self.assertLess(operating_surplus * 100, result["paid_sales_minor"] * 25)
 
     def test_visitor_can_enter_populated_demo_and_real_accounts_cannot_see_it(self):
         root = self.client.get("/")
@@ -185,7 +188,14 @@ class PublicDemoTests(unittest.TestCase):
         self.client.get("/")
         payload = self.client.get("/briefings/demo").json()["content"]
         metrics = payload["metrics"]
+        self.assertEqual(metrics["currency"], "USD")
         conn = database.get_connection()
+
+        cash = metrics["cash"]
+        self.assertEqual(cash["inflows_minor"] - cash["outflows_minor"], cash["recorded_cash_balance_minor"])
+        self.assertGreater(cash["recorded_cash_balance_minor"], 0)
+        self.assertEqual(cash["inflow_count"] + cash["outflow_count"], len(cash["workings_rows"]))
+        self.assertEqual(cash["trend"][-1]["ending_balance_minor"], cash["recorded_cash_balance_minor"])
 
         for receivable in metrics["overdue_receivables"]:
             row = conn.execute(
@@ -194,6 +204,8 @@ class PublicDemoTests(unittest.TestCase):
             ).fetchone()
             self.assertEqual(row["organization_id"], database.DEMO_ORGANIZATION_ID)
             self.assertEqual(row["total_amount_minor"], receivable["amount_minor"])
+            self.assertGreater(receivable["days_overdue"], 0)
+            self.assertEqual(receivable["workings_rows"][0]["id"], receivable["id"])
 
         for product in metrics["stockout_products"]:
             stock = conn.execute(

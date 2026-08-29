@@ -11,7 +11,7 @@ from backend.migrations import upgrade
 
 
 SOURCE = "demo_seed"
-CURRENCY = "MYR"
+CURRENCY = "USD"
 
 
 def _month_start(base: date, offset: int) -> date:
@@ -95,8 +95,8 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                 "external_id": "demo-company",
                 "company_name": "Harbour & Pine Coffee Supply",
                 "industry": "Specialty coffee retail and wholesale",
-                "country": "Malaysia",
-                "monthly_budget_minor": 1_500_000,
+                "country": "United States",
+                "monthly_budget_minor": 300_000,
                 "currency": CURRENCY,
                 "products_services": "Coffee beans, café supplies, bottled cold brew, and drinkware",
                 "target_customers": "Independent cafés, offices, and home coffee enthusiasts",
@@ -130,7 +130,7 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
 
         supplier_specs = (
             ("Peninsula Roasters", "orders@peninsularoasters.example", 10, "Net 30"),
-            ("Klang Valley Packaging", "sales@kvpack.example", 14, "Net 14"),
+            ("Harbour Packaging", "sales@harbourpack.example", 14, "Net 14"),
             ("Northern Café Supply", "hello@northerncafe.example", 7, "Payment on delivery"),
         )
         supplier_ids = []
@@ -145,7 +145,7 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                         "name": name,
                         "contact_name": "Demo Account Manager",
                         "email": email,
-                        "phone": "+60 3 5550 0100",
+                        "phone": "+1 555 010 0100",
                         "lead_time_days": lead_time,
                         "payment_terms": terms,
                         "created_at": _timestamp(months[0]),
@@ -156,7 +156,7 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
         customer_specs = (
             ("Northbank Café", "Wholesale", "accounts@northbank.example"),
             ("Studio Eleven", "Office", "office@studioeleven.example"),
-            ("Merdeka Coffee Bar", "Wholesale", "hello@merdekacoffee.example"),
+            ("Riverside Coffee Bar", "Wholesale", "hello@riversidecoffee.example"),
             ("Walk-in Retail", "Retail", "retail@example.invalid"),
             ("Lighthouse Coworking", "Office", "finance@lighthouse.example"),
             ("Juniper Bakery", "Wholesale", "orders@juniper.example"),
@@ -172,7 +172,7 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                         "external_id": f"demo-customer-{index}",
                         "name": name,
                         "email": email,
-                        "phone": "+60 12 555 0100",
+                        "phone": "+1 555 010 0200",
                         "segment": segment,
                         "notes": "Fictional customer used in the public demo.",
                         "created_at": _timestamp(months[0]),
@@ -318,13 +318,13 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                     )
 
         expense_totals_minor = 0
-        marketing_values = (45_000, 45_000, 48_000, 48_000, 50_000, 52_000, 50_000, 55_000, 58_000, 60_000, 105_000, 180_000)
+        marketing_values = (15_000, 15_000, 16_000, 16_000, 17_000, 18_000, 17_000, 18_000, 19_000, 20_000, 35_000, 60_000)
         for month_index, month in enumerate(months):
             expenses = {
-                "Rent": 180_000,
-                "Payroll": 350_000,
-                "Utilities": 42_000 + (month_index % 3) * 3_000,
-                "Logistics": 65_000 + (month_index % 4) * 4_000,
+                "Rent": 60_000,
+                "Payroll": 120_000,
+                "Utilities": 15_000 + (month_index % 3) * 2_000,
+                "Logistics": 24_000 + (month_index % 4) * 2_000,
                 "Marketing": marketing_values[month_index],
             }
             for category, amount_minor in expenses.items():
