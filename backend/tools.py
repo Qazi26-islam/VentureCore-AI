@@ -254,7 +254,8 @@ def _workings(
 
 def _inventory_snapshot(context: ToolContext, body: SnapshotInput) -> InventorySnapshotOutput:
     connection = get_connection()
-    cutoff = _snapshot_as_of(body) - timedelta(days=body.lookback_days)
+    as_of = _snapshot_as_of(body)
+    cutoff = as_of - timedelta(days=body.lookback_days)
     try:
         products = connection.execute(
             """SELECT p.id, p.sku, p.name, p.category, p.unit_cost_minor,
@@ -270,9 +271,9 @@ def _inventory_snapshot(context: ToolContext, body: SnapshotInput) -> InventoryS
         transactions = connection.execute(
             """SELECT id, product_id, transaction_type, quantity_change, created_at
                  FROM inventory_transactions
-                WHERE user_id = ? AND organization_id = ?
+                WHERE user_id = ? AND organization_id = ? AND created_at <= ?
                 ORDER BY created_at, id""",
-            (context.user_id, context.organization_id),
+            (context.user_id, context.organization_id, as_of.isoformat(sep=" ")),
         ).fetchall()
         by_product: dict[int, list[sqlite3.Row]] = {}
         for transaction in transactions:
@@ -845,8 +846,9 @@ def _daily_briefing_metrics(
                 """SELECT id, created_at, transaction_type, quantity_change, reference_note
                      FROM inventory_transactions
                     WHERE organization_id = ? AND user_id = ? AND product_id = ?
+                      AND created_at <= ?
                     ORDER BY created_at, id""",
-                (context.organization_id, context.user_id, item.id),
+                (context.organization_id, context.user_id, item.id, as_of.isoformat()),
             ).fetchall()
             stockout_products.append({
                 "product_id": item.id,

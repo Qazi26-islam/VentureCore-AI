@@ -188,6 +188,10 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
             ("Filter Papers 100-pack", "FILTER-100", 500, 900, 20, 7, 20, 2),
         )
         seasonality = (80, 84, 88, 92, 96, 100, 94, 102, 108, 116, 132, 150)
+        completed_month_indexes = [
+            index for index, month in enumerate(months) if month + timedelta(days=14) <= today
+        ]
+        cold_brew_shortage_months = set(completed_month_indexes[-2:])
         product_ids = []
         total_sales_minor = 0
         paid_sales_minor = 0
@@ -236,10 +240,13 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
             )
 
             for month_index, month in enumerate(months):
+                sale_date = month + timedelta(days=14)
+                if sale_date > today:
+                    continue
                 quantity = max(1, (base_sales * seasonality[month_index] + 50) // 100)
                 receipt_quantity = quantity
-                if product_index == 4 and month_index >= 9:
-                    receipt_quantity = max(0, quantity - 16)
+                if product_index == 4 and month_index in cold_brew_shortage_months:
+                    receipt_quantity = max(0, quantity - 24)
                 received_quantities[product_id] += receipt_quantity
                 sold_quantities[product_id] += quantity
                 if receipt_quantity:
@@ -261,7 +268,6 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
 
                 is_overdue = product_index == 1 and month_index == 10
                 payment_status = "due" if is_overdue else "paid"
-                sale_date = month + timedelta(days=14)
                 due_date = month + timedelta(days=20) if is_overdue else None
                 total_amount_minor = quantity * price_minor
                 total_sales_minor += total_amount_minor
@@ -328,8 +334,10 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                 "Marketing": marketing_values[month_index],
             }
             for category, amount_minor in expenses.items():
-                expense_totals_minor += amount_minor
                 transaction_day = month + timedelta(days=24)
+                if transaction_day > today:
+                    continue
+                expense_totals_minor += amount_minor
                 _insert(
                     connection,
                     "finance_transactions",

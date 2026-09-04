@@ -1760,14 +1760,30 @@ demoViewBtn.addEventListener("click", async () => {
   await enterDemoMode();
 });
 
-demoSignupLink.addEventListener("click", async () => {
-  await fetch("/demo/exit", { method: "POST" });
+async function leaveDemo(authDestination = "login") {
+  const response = await fetch("/demo/exit", { method: "POST" });
+  if (!response.ok) {
+    alert("The demo could not be closed. Please try again.");
+    return;
+  }
+  [briefingModalOverlay, inventoryModalOverlay, salesModalOverlay, financeModalOverlay, dataModalOverlay, companyModalOverlay, shopifyModalOverlay].forEach(overlay => overlay.classList.remove("visible"));
   enterGuestMode();
-  setAuthMode("signup");
+  setAuthMode(authDestination);
   authOverlay.style.display = "flex";
+}
+
+demoSignupLink.addEventListener("click", async () => {
+  await leaveDemo("signup");
 });
 
-logoutBtn.addEventListener("click", async () => { await fetch("/auth/logout", { method: "POST" }); location.reload(); });
+logoutBtn.addEventListener("click", async () => {
+  if (isDemo) {
+    await leaveDemo("login");
+    return;
+  }
+  await fetch("/auth/logout", { method: "POST" });
+  location.reload();
+});
 
 async function afterLogin(email) {
   isGuest = false;

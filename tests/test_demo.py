@@ -184,6 +184,17 @@ class PublicDemoTests(unittest.TestCase):
             self.assertEqual(self.client.get("/briefings/demo").status_code, 200)
             self.assertTrue(all(mock.call_count == 0 for mock in mocks))
 
+    def test_exit_demo_clears_demo_session_without_reloading_root(self):
+        self.client.get("/")
+        self.assertTrue(self.client.get("/auth/me").json()["demo_mode"])
+
+        exited = self.client.post("/demo/exit")
+
+        self.assertEqual(exited.status_code, 200, exited.text)
+        identity = self.client.get("/auth/me").json()
+        self.assertFalse(identity["logged_in"])
+        self.assertFalse(identity.get("demo_mode", False))
+
     def test_demo_briefing_figures_reconcile_to_seeded_source_rows(self):
         self.client.get("/")
         payload = self.client.get("/briefings/demo").json()["content"]
