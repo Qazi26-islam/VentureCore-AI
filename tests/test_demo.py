@@ -53,6 +53,27 @@ class PublicDemoTests(unittest.TestCase):
         conn.close()
         return counts
 
+    def test_workspace_views_are_inside_the_main_landmark(self):
+        html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+        self.assertEqual(html.count("<main "), 1)
+        main_start = html.index('<main class="main-area" id="workspaceMain">')
+        main_end = html.index("</main>", main_start)
+        self.assertLess(html.index('id="sidebar"'), main_start)
+        for view_id in (
+            "agentModalOverlay",
+            "companyModalOverlay",
+            "dataModalOverlay",
+            "inventoryModalOverlay",
+            "salesModalOverlay",
+            "financeModalOverlay",
+            "shopifyModalOverlay",
+            "briefingModalOverlay",
+            "researchWorkspace",
+        ):
+            position = html.index(f'id="{view_id}"')
+            self.assertGreater(position, main_start, view_id)
+            self.assertLess(position, main_end, view_id)
+
     def test_seed_is_idempotent_reconciled_and_contains_expected_anomalies(self):
         result = seed_demo(today=date(2026, 8, 28))
         first_counts = self._demo_counts()
