@@ -104,6 +104,14 @@ class PublicDemoTests(unittest.TestCase):
         ).fetchall()
         self.assertEqual([row[0] for row in marketing[-3:]], [20_000, 35_000, 60_000])
 
+        seeded_text = conn.execute(
+            """SELECT description FROM finance_transactions WHERE organization_id = ?
+               UNION ALL
+               SELECT reference_note FROM sales_orders WHERE organization_id = ?""",
+            (database.DEMO_ORGANIZATION_ID, database.DEMO_ORGANIZATION_ID),
+        ).fetchall()
+        self.assertFalse(any("fictional" in (row[0] or "").lower() for row in seeded_text))
+
         recorded_sales = conn.execute(
             "SELECT SUM(total_amount_minor) FROM sales_orders WHERE organization_id = ?",
             (database.DEMO_ORGANIZATION_ID,),
@@ -207,6 +215,20 @@ class PublicDemoTests(unittest.TestCase):
         self.assertGreater(cash["recorded_cash_balance_minor"], 0)
         self.assertEqual(cash["inflow_count"] + cash["outflow_count"], len(cash["workings_rows"]))
         self.assertEqual(cash["trend"][-1]["ending_balance_minor"], cash["recorded_cash_balance_minor"])
+        subtotals = cash["category_subtotals"]
+        self.assertEqual(
+            sum(item["amount_minor"] for item in subtotals if item["transaction_type"] == "income"),
+            cash["inflows_minor"],
+        )
+        self.assertEqual(
+            sum(item["amount_minor"] for item in subtotals if item["transaction_type"] == "expense"),
+            cash["outflows_minor"],
+        )
+        self.assertEqual(sum(item["row_count"] for item in subtotals), len(cash["workings_rows"]))
+        self.assertEqual(
+            sorted(row_id for item in subtotals for row_id in item["source_row_ids"]),
+            sorted(cash["source_row_ids"]["finance_transactions"]),
+        )
 
         for receivable in metrics["overdue_receivables"]:
             row = conn.execute(

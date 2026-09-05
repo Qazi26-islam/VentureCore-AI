@@ -746,6 +746,24 @@ def _daily_briefing_metrics(
             }
             for row in transactions
         ]
+        category_subtotals: dict[str, dict[str, Any]] = {}
+        for row in transactions:
+            category = row["category"] or "Other"
+            key = f'{row["transaction_type"]}:{category}'
+            subtotal = category_subtotals.setdefault(
+                key,
+                {
+                    "category": category,
+                    "transaction_type": row["transaction_type"],
+                    "amount_minor": 0,
+                    "row_count": 0,
+                    "currency": row["currency"],
+                    "source_row_ids": [],
+                },
+            )
+            subtotal["amount_minor"] += int(row["amount_minor"])
+            subtotal["row_count"] += 1
+            subtotal["source_row_ids"].append(int(row["id"]))
         monthly: dict[str, dict[str, Any]] = {}
         running_balance = 0
         for row in transactions:
@@ -783,6 +801,10 @@ def _daily_briefing_metrics(
             "inflow_count": sum(1 for row in transactions if row["transaction_type"] == "income"),
             "outflow_count": sum(1 for row in transactions if row["transaction_type"] == "expense"),
             "workings_rows": cash_rows,
+            "category_subtotals": sorted(
+                category_subtotals.values(),
+                key=lambda item: (item["transaction_type"] != "income", item["category"]),
+            ),
             "trend": cash_trend,
             "source_row_ids": {
                 "finance_transactions": [int(row["id"]) for row in transactions]

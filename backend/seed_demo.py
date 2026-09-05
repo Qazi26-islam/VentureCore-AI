@@ -174,7 +174,7 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                         "email": email,
                         "phone": "+1 555 010 0200",
                         "segment": segment,
-                        "notes": "Fictional customer used in the public demo.",
+                        "notes": "Wholesale customer account.",
                         "created_at": _timestamp(months[0]),
                     },
                 )
@@ -285,7 +285,7 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                         "currency": CURRENCY,
                         "payment_status": payment_status,
                         "due_date": due_date.isoformat() if due_date else None,
-                        "reference_note": "Fictional monthly demo sale",
+                        "reference_note": "Monthly product sale",
                         "created_at": _timestamp(sale_date, 12),
                     },
                 )
@@ -348,7 +348,7 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                         "amount_minor": amount_minor,
                         "currency": CURRENCY,
                         "category": category,
-                        "description": f"Fictional {category.lower()} expense for {month:%B %Y}",
+                        "description": f"{category} — {month:%B %Y}",
                         "related_sale_id": None,
                         "transaction_date": transaction_day.isoformat(),
                         "created_at": _timestamp(transaction_day, 9),

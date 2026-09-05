@@ -105,17 +105,24 @@
   .briefing-sparkline { width:100%; height:72px; display:block; }
   .briefing-sparkline polyline { fill:none; stroke:var(--accent); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
   .briefing-sparkline .baseline { stroke:var(--border); stroke-width:1; }
+  .briefing-sparkline .endpoint { fill:var(--accent); }
+  .briefing-sparkline .endpoint-label { fill:var(--text); font-size:8px; font-weight:800; }
+  .sparkline-title { color:var(--muted); font-size:10px; margin-bottom:2px; }
   .cover-track { height:9px; overflow:hidden; border-radius:999px; background:var(--border); margin:8px 0 4px; }
   .cover-fill { height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--error),var(--warn)); }
   .cover-labels { display:flex; justify-content:space-between; color:var(--muted); font-size:10px; }
   .workings-panel { margin-top:10px; font-size:11px; color:var(--muted); }
   .workings-panel > summary { cursor:pointer; color:var(--accent); font-weight:800; }
   .workings-summary { margin:10px 0; color:var(--text); font-size:12px; line-height:1.5; }
+  .workings-subtotals { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
+  .workings-subtotal { padding:6px 8px; border:1px solid var(--border); border-radius:7px; color:var(--text); font-size:10px; }
+  .workings-row-count { margin:0 0 6px; color:var(--muted); font-size:10px; font-weight:700; }
   .workings-table-wrap { max-height:250px; overflow:auto; border:1px solid var(--border); border-radius:8px; }
   .workings-table { width:100%; border-collapse:collapse; font-size:11px; }
   .workings-table th,.workings-table td { padding:7px 8px; border-bottom:1px solid var(--border); text-align:left; }
   .workings-table th { position:sticky; top:0; background:var(--panel); color:var(--muted); text-transform:uppercase; font-size:9.5px; }
   .workings-table td.amount { text-align:right; white-space:nowrap; }
+  .workings-table th:first-child,.workings-table td:first-child { white-space:nowrap; }
   .workings-meta { margin-top:8px; color:var(--muted); font-size:9.5px; }
   .inventory-section h3 { margin:0 0 4px; font-size:14px; }
   .inventory-section-note { color:var(--muted); font-size:11.5px; margin-bottom:12px; }
@@ -1862,7 +1869,7 @@ shopifyDisconnectBtn.addEventListener("click", async () => {
   await loadShopifyStatus();
 });
 
-function briefingWorkingsHtml(summary, rows, inputs, sourceRowIds, signedAmounts = false) {
+function briefingWorkingsHtml(summary, rows, inputs, sourceRowIds, signedAmounts = false, subtotals = []) {
   const headers = rows.some(row => row.amount_minor !== undefined)
     ? '<th>Date</th><th>Description</th><th>Amount</th>'
     : '<th>Date</th><th>Description</th><th>Stock change</th>';
@@ -1874,22 +1881,38 @@ function briefingWorkingsHtml(summary, rows, inputs, sourceRowIds, signedAmounts
     return '<tr><td>' + escapeHtml(row.date) + '</td><td>' + escapeHtml(row.description) + period + '</td><td class="amount">' + value + '</td></tr>';
   }).join("");
   const sourceCount = Object.values(sourceRowIds || {}).reduce((total, ids) => total + ids.length, 0);
+  const visibleRows = Math.min(rows.length, 8);
+  const rowCountLabel = rows.length > visibleRows
+    ? 'First ' + visibleRows + ' of ' + rows.length + ' rows are visible — scroll to see all rows.'
+    : rows.length + (rows.length === 1 ? ' source row.' : ' source rows.');
+  const subtotalHtml = subtotals.length
+    ? '<div class="workings-subtotals">' + subtotals.map(item => {
+        const sign = item.transaction_type === "expense" ? "−" : "+";
+        return '<span class="workings-subtotal"><strong>' + escapeHtml(item.category) + ':</strong> ' + sign + currency(item.amount_minor, item.currency) + ' · ' + escapeHtml(item.row_count) + ' rows</span>';
+      }).join("") + '</div>'
+    : '';
   return '<details class="workings-panel"><summary>Show workings</summary>' +
     '<div class="workings-summary">' + summary + '</div>' +
+    subtotalHtml +
+    '<div class="workings-row-count">' + rowCountLabel + '</div>' +
     '<div class="workings-table-wrap"><table class="workings-table"><thead><tr>' + headers + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
     '<div class="workings-meta">Tool: <code>get_daily_briefing_metrics</code> · Inputs: as_of=' + escapeHtml(inputs.as_of) + ' · Provenance: ' + sourceCount + ' source rows</div></details>';
 }
 
-function cashSparkline(trend) {
+function cashSparkline(trend, currencyCode) {
   if (!trend.length) return "";
   const values = trend.map(point => Number(point.ending_balance_minor));
   const low = Math.min(...values); const high = Math.max(...values); const range = Math.max(1, high - low);
-  const points = values.map((value, index) => {
+  const coordinates = values.map((value, index) => {
     const x = values.length === 1 ? 100 : index * 200 / (values.length - 1);
     const y = 62 - ((value - low) / range) * 52;
-    return x.toFixed(1) + "," + y.toFixed(1);
-  }).join(" ");
-  return '<div><svg class="briefing-sparkline" viewBox="0 0 200 72" role="img" aria-label="Twelve-month recorded cash balance trend"><line class="baseline" x1="0" y1="64" x2="200" y2="64"></line><polyline points="' + points + '"></polyline></svg><div class="cover-labels"><span>' + escapeHtml(trend[0].month) + '</span><span>' + escapeHtml(trend[trend.length - 1].month) + '</span></div></div>';
+    return { x, y };
+  });
+  const points = coordinates.map(point => point.x.toFixed(1) + "," + point.y.toFixed(1)).join(" ");
+  const endpoint = coordinates[coordinates.length - 1];
+  const labelY = endpoint.y < 20 ? endpoint.y + 13 : endpoint.y - 7;
+  const finalValue = currency(values[values.length - 1], currencyCode);
+  return '<div><div class="sparkline-title">Cumulative recorded cash balance</div><svg class="briefing-sparkline" viewBox="0 0 200 72" role="img" aria-label="Twelve-month cumulative recorded cash balance ending at ' + escapeHtml(finalValue) + '"><line class="baseline" x1="0" y1="64" x2="200" y2="64"></line><polyline points="' + points + '"></polyline><circle class="endpoint" cx="' + endpoint.x.toFixed(1) + '" cy="' + endpoint.y.toFixed(1) + '" r="3"></circle><text class="endpoint-label" x="198" y="' + labelY.toFixed(1) + '" text-anchor="end">' + escapeHtml(finalValue) + '</text></svg><div class="cover-labels"><span>' + escapeHtml(trend[0].month) + '</span><span>' + escapeHtml(trend[trend.length - 1].month) + '</span></div></div>';
 }
 
 function daysCoverBar(days) {
@@ -1907,11 +1930,11 @@ function renderDemoBriefing(briefing) {
   const anomalies = metrics.expense_anomalies || [];
   const toolInputs = { as_of: metrics.as_of };
   const changeDirection = Number(cash.change_minor) >= 0 ? "better" : "lower";
-  const cashEquation = 'Inflows <strong>' + currency(cash.inflows_minor, metrics.currency) + '</strong> across ' + cash.inflow_count + ' transactions − outflows <strong>' + currency(cash.outflows_minor, metrics.currency) + '</strong> across ' + cash.outflow_count + ' = recorded balance <strong>' + currency(cash.recorded_cash_balance_minor, metrics.currency) + '</strong>.';
+  const cashEquation = 'Inflows <strong>' + currency(cash.inflows_minor, metrics.currency) + '</strong> across ' + cash.inflow_count + ' transactions − outflows <strong>' + currency(cash.outflows_minor, metrics.currency) + '</strong> across ' + cash.outflow_count + ' transactions = recorded balance <strong>' + currency(cash.recorded_cash_balance_minor, metrics.currency) + '</strong>.';
   briefingOutput.innerHTML =
     '<div class="briefing-block"><div class="briefing-figure-row"><div><h3>Recorded operating cash balance</h3><strong>' + currency(cash.recorded_cash_balance_minor, metrics.currency) + '</strong>' +
-      '<p>Income received minus recorded operating expenses across the 12-month demo period. The last 30 days produced ' + currency(cash.current_net_cash_flow_minor, metrics.currency) + ' net cash flow, ' + currency(Math.abs(cash.change_minor), metrics.currency) + ' ' + changeDirection + ' than the previous 30 days.</p></div>' + cashSparkline(cash.trend || []) + '</div>' +
-      briefingWorkingsHtml(cashEquation, cash.workings_rows || [], toolInputs, cash.source_row_ids || {}, true) + '</div>' +
+      '<p>Income received minus recorded operating expenses across the 12-month demo period. The last 30 days produced ' + currency(cash.current_net_cash_flow_minor, metrics.currency) + ' net cash flow, ' + currency(Math.abs(cash.change_minor), metrics.currency) + ' ' + changeDirection + ' than the previous 30 days.</p></div>' + cashSparkline(cash.trend || [], metrics.currency) + '</div>' +
+      briefingWorkingsHtml(cashEquation, cash.workings_rows || [], toolInputs, cash.source_row_ids || {}, true, cash.category_subtotals || []) + '</div>' +
     '<div class="briefing-block"><h3>Receivables needing attention</h3>' +
       (receivables.length ? '<ul>' + receivables.map(item => '<li><strong>' + escapeHtml(item.customer_name) + '</strong> owes ' + currency(item.amount_minor, item.currency) + ' — <strong>' + escapeHtml(item.days_overdue) + ' days overdue</strong>.' + briefingWorkingsHtml('One unpaid invoice totals <strong>' + currency(item.amount_minor, item.currency) + '</strong>.', item.workings_rows || [], toolInputs, item.source_row_ids || {}) + '</li>').join('') + '</ul>' : '<p>No overdue receivables.</p>') + '</div>' +
     '<div class="briefing-block"><h3>Products approaching a stockout</h3>' +
