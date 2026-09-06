@@ -211,6 +211,10 @@ class PublicDemoTests(unittest.TestCase):
             self.assertEqual(self.client.get("/").status_code, 200)
             self.assertTrue(self.client.get("/auth/me").json()["demo_mode"])
             self.assertEqual(self.client.get("/briefings/demo").status_code, 200)
+            sample_report = self.client.get("/research/job/demo-management-report")
+            self.assertEqual(sample_report.status_code, 200)
+            self.assertIn("Juniper Bakery", sample_report.json()["report"])
+            self.assertIn("12 Cold Brew Bottles", sample_report.json()["report"])
             self.assertTrue(all(mock.call_count == 0 for mock in mocks))
 
     def test_exit_demo_clears_demo_session_without_reloading_root(self):

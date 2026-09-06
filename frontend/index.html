@@ -101,6 +101,19 @@
   .briefing-block ul, .briefing-block ol { margin:7px 0 0; padding-left:20px; }
   .briefing-block li { margin:7px 0; font-size:12.5px; line-height:1.5; }
   .briefing-kicker { margin:-6px 0 14px; color:var(--muted); font-size:12px; }
+  .project-context { margin:0 0 14px; padding:11px 12px; border:1px solid var(--border); border-radius:10px; background:rgba(124,156,255,.06); font-size:11.5px; line-height:1.5; color:var(--muted); }
+  .project-context strong { color:var(--text); }
+  .project-context a { color:var(--accent); font-weight:700; text-decoration:none; white-space:nowrap; }
+  .demo-research-note { display:none; margin:0 0 14px; padding:11px 12px; border:1px solid rgba(124,156,255,.4); border-radius:10px; background:rgba(124,156,255,.08); color:var(--muted); font-size:12px; line-height:1.5; }
+  .demo-research-note strong { color:var(--text); }
+  body.demo-mode.research-sample-mode .demo-research-note { display:block; }
+  body.demo-mode.research-sample-mode .mode-toggle,
+  body.demo-mode.research-sample-mode #researchSetup,
+  body.demo-mode.research-sample-mode #depthSelector,
+  body.demo-mode.research-sample-mode #companyUseRow,
+  body.demo-mode.research-sample-mode .input-row,
+  body.demo-mode.research-sample-mode #agentsGrid,
+  body.demo-mode.research-sample-mode #hint { display:none !important; }
   .briefing-figure-row { display:grid; grid-template-columns:minmax(0,1fr) 220px; gap:18px; align-items:center; }
   .briefing-sparkline { width:100%; height:72px; display:block; }
   .briefing-sparkline polyline { fill:none; stroke:var(--accent); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
@@ -703,6 +716,7 @@
     <h2>Executive Briefing</h2>
     <p>Your most important cash, receivables, inventory, and expense signals in one traceable view.</p>
     <div class="briefing-kicker">VentureCore turns your sales, inventory, and finance records into a traceable morning action list.</div>
+    <div class="project-context"><strong>About this project:</strong> VentureCore AI is a portfolio-built business intelligence system that turns company records into traceable decisions. Designed and engineered by Qazi Tanzimul Islam using FastAPI, SQLite, vanilla JavaScript, Gemini function calling, and deterministic typed Python tools. <a href="https://github.com/Qazi26-islam/VentureCore-AI#readme" target="_blank" rel="noopener">Architecture &amp; source</a></div>
     <div class="briefing-output" id="briefingOutput">Loading the prepared briefing…</div>
     <div id="briefingPreferencesPanel">
       <h3 style="font-size:14px;margin:16px 0 8px;">Email delivery</h3>
@@ -747,6 +761,8 @@
         <p>Know what to reorder, who owes you money, and where your cash is going.</p>
         <div style="margin-top:8px;color:var(--muted);font-size:12px;">Business Research Agents</div>
       </header>
+
+      <div class="demo-research-note" id="demoResearchNote"><strong>Prepared sample agent report.</strong> This saved output lets you evaluate the research workflow without making a Gemini API call or consuming any quota.</div>
 
       <div class="mode-toggle">
         <button class="mode-btn active" data-mode="market">Research a Market</button>
@@ -902,6 +918,7 @@ const newResearchBtn = document.getElementById("newResearchBtn");
 const demoViewBtn = document.getElementById("demoViewBtn");
 const demoBanner = document.getElementById("demoBanner");
 const demoSignupLink = document.getElementById("demoSignupLink");
+const demoResearchNote = document.getElementById("demoResearchNote");
 const companyProfileBtn = document.getElementById("companyProfileBtn");
 const inventoryOpenBtn = document.getElementById("inventoryOpenBtn");
 const salesOpenBtn = document.getElementById("salesOpenBtn");
@@ -1720,7 +1737,7 @@ function setDemoReadOnly(readOnly) {
 function enterGuestMode() {
   isGuest = true;
   isDemo = false;
-  document.body.classList.remove("demo-mode");
+  document.body.classList.remove("demo-mode", "research-sample-mode");
   authOverlay.style.display = "none";
   researchWorkspace.style.display = "block";
   demoBanner.style.display = "none";
@@ -1746,6 +1763,7 @@ async function enterDemoMode() {
   isGuest = false;
   isDemo = true;
   document.body.classList.add("demo-mode");
+  document.body.classList.remove("research-sample-mode");
   authOverlay.style.display = "none";
   researchWorkspace.style.display = "none";
   demoBanner.style.display = "flex";
@@ -1807,7 +1825,7 @@ logoutBtn.addEventListener("click", async () => {
 async function afterLogin(email) {
   isGuest = false;
   isDemo = false;
-  document.body.classList.remove("demo-mode");
+  document.body.classList.remove("demo-mode", "research-sample-mode");
   demoBanner.style.display = "none";
   researchWorkspace.style.display = "block";
   demoViewBtn.style.display = "none";
@@ -1957,6 +1975,8 @@ function renderDemoBriefing(briefing) {
 }
 
 async function openDemoBriefing() {
+  document.body.classList.remove("research-sample-mode");
+  researchWorkspace.style.display = "none";
   [inventoryModalOverlay, salesModalOverlay, financeModalOverlay, dataModalOverlay, companyModalOverlay, shopifyModalOverlay].forEach(overlay => overlay.classList.remove("visible"));
   briefingPreferencesPanel.style.display = "none";
   briefingOutput.style.display = "block";
@@ -2102,12 +2122,18 @@ async function loadJob(jobId) {
   loadHistory();
 }
 
-newResearchBtn.addEventListener("click", () => {
+newResearchBtn.addEventListener("click", async () => {
   if (isDemo) {
-    setAuthMode("signup");
-    authOverlay.style.display = "flex";
+    [inventoryModalOverlay, salesModalOverlay, financeModalOverlay, briefingModalOverlay, dataModalOverlay, companyModalOverlay, shopifyModalOverlay].forEach(overlay => overlay.classList.remove("visible"));
+    document.body.classList.add("research-sample-mode");
+    researchWorkspace.style.display = "block";
+    demoResearchNote.style.display = "block";
+    await loadJob("demo-management-report");
+    document.querySelector(".main-area").scrollTo({ top:0, behavior:"smooth" });
     return;
   }
+  document.body.classList.remove("research-sample-mode");
+  demoResearchNote.style.display = "none";
   if (isResearching) return;
   [inventoryModalOverlay, salesModalOverlay, financeModalOverlay, briefingModalOverlay, dataModalOverlay, companyModalOverlay, shopifyModalOverlay].forEach(overlay => overlay.classList.remove("visible"));
   researchWorkspace.style.display = "block";

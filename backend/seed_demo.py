@@ -356,14 +356,20 @@ def seed_demo(conn: sqlite3.Connection | None = None, today: date | None = None)
                 )
 
         report = (
-            "**Executive Summary:**\n\n"
-            "Harbour & Pine has seasonal revenue growth and positive recorded operating cash flow. "
-            "Cold Brew Bottle stock has fallen below its reorder point, one wholesale invoice is overdue, "
-            "and marketing expense increased sharply in the latest two months.\n\n---\n\n"
-            "**Recommended Actions:**\n\n"
-            "- Confirm the next Cold Brew Bottle supplier delivery.\n"
-            "- Follow up on the overdue Northbank Café receivable.\n"
-            "- Review the return from the recent marketing increase before extending it."
+            "**Executive Summary**\n\n"
+            "Harbour & Pine is growing seasonally and remains cash-positive, but three operating signals "
+            "need attention: Cold Brew Bottle is below its reorder point, Juniper Bakery has an overdue "
+            "wholesale invoice, and marketing spend has accelerated against its own recent baseline.\n\n"
+            "**Evidence reviewed**\n\n"
+            "- The inventory ledger reconciles to 12 Cold Brew Bottles on hand after recorded receipts and sales.\n"
+            "- Juniper Bakery's unpaid order is worth USD 2,240.00 and has passed its due date.\n"
+            "- Marketing is the fastest-rising operating expense category in the latest completed period.\n\n"
+            "**Recommended Actions**\n\n"
+            "1. Confirm the next Cold Brew Bottle supplier delivery before accepting another large order.\n"
+            "2. Contact Juniper Bakery and agree a payment date for the overdue invoice.\n"
+            "3. Review campaign-level marketing results before extending the higher spend.\n\n"
+            "**Decision**\n\n"
+            "Continue operating, but resolve the inventory and receivables risks before increasing discretionary spend."
         )
         _insert(
             connection,

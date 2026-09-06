@@ -2,6 +2,8 @@
 
 VentureCore AI ingests small-business inventory, sales, and finance records, calculates traceable operating metrics, and delivers dashboards, agent explanations, and scheduled executive briefings. It is an intelligence layer over source systems—not a replacement ledger—and every displayed business figure is produced by deterministic code with source-row evidence.
 
+This project was designed and engineered by **Qazi Tanzimul Islam** as a full-stack AI engineering portfolio project. The public demo requires no account: it opens on a populated Executive Briefing, and **Business Research Agents** opens a saved sample report so reviewers can assess the agent output without spending API quota.
+
 ## Architecture
 
 ![Rendered VentureCore architecture](docs/architecture.png)
